@@ -37,7 +37,7 @@ main.rs
 - `Arc<Bot>` — оба используют для отправки сообщений
 - `Arc<Config>` — оба читают `thread_id`
 
-Запуск через `tokio::spawn` + `tokio::select!` с логированием падения. Без retry/restart — `Restart=on-failure` в systemd поднимет весь процесс.
+Каждая задача обёрнута в `run_supervised` (`src/supervisor.rs`), который ловит панику через `catch_unwind` и рестартует с задержкой в 1 секунду. Запуск через `tokio::join!` — оба супервизора работают вечно, `main` не завершается. Падение одного таска не роняет другой. `systemd Restart=on-failure` остаётся страховкой на случай падения процесса целиком (OOM, kernel panic).
 
 ## Модули
 

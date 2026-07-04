@@ -1,4 +1,9 @@
-# Резюме для дев-агента: Homelab Bot — Forum Topics
+# Резюме для дев-агента: Homelab Bot
+
+## Архитектура
+
+Читай `ARCHITECTURE.md` — там описаны модули, запуск, конфигурация и
+важные ограничения (ROOT, supervised tasks, фильтрация сообщений).
 
 ## Стек
 
@@ -6,90 +11,6 @@
 - `serde` / `serde_json` — сериализация
 - Сборка кросс-компиляцией под линукс через `cross`, релизы — через `jrit`
   (уже в PATH)
-
-## Forum Topics в приватном чате с ботом
-
-**Настроено в BotFather:**
-
-- Threaded Mode = ON
-- Disallow users to create new threads = ON
-
-**Комиссия:** 15% только при реальных Stars-покупках внутри бота. Платных
-фич нет — не касается.
-
-**Топики создаются один раз, thread_id сохраняется в конфиг/локальную базу**,
-не пересоздаются при каждом старте:
-
-```rust
-use teloxide::prelude::*;
-use teloxide::types::ChatId;
-
-async fn create_topic(bot: &Bot, chat_id: ChatId, name: &str) -> ResponseResult<i32> {
-    let topic = bot.create_forum_topic(chat_id, name).await?;
-    Ok(topic.message_thread_id)
-}
-```
-
-Отправка в конкретный топик:
-
-```rust
-async fn send_to_topic(bot: &Bot, chat_id: ChatId, thread_id: i32, text: &str) -> ResponseResult<()> {
-    bot.send_message(chat_id, text)
-        .message_thread_id(thread_id)
-        .await?;
-    Ok(())
-}
-```
-
-Методы управления: `create_forum_topic`, `edit_forum_topic`,
-`close_forum_topic`, `delete_forum_topic`.
-
-## Быстрые заметки через сам чат
-
-Юзер пишет текст прямо в топик "Быстрые заметки". Бот фильтрует входящие по
-`message_thread_id`:
-
-```rust
-async fn handle_message(bot: Bot, msg: Message, quick_notes_thread_id: i32) -> ResponseResult<()> {
-    if msg.thread_id == Some(quick_notes_thread_id) {
-        if let Some(text) = msg.text() {
-            // сохранить заметку
-        }
-    }
-    Ok(())
-}
-```
-
-Не-текстовые сообщения (фото/голос/файлы) в этом топике — **молча
-игнорируются**. Не отвечать в чат, не логировать как ошибку — это штатный
-фильтр, не ошибочная ситуация.
-
-Топик "Уведомления" — только вывод от бота, юзер туда не пишет.
-
-## Хранение заметок — ROOT
-
-`ROOT` (путь из `.env`) — это папка `inbox/` в Obsidian vault. Бот **не
-должен** вызывать `create_dir_all(root)`, если директория отсутствует.
-Наличие `ROOT` — инфраструктурная ответственность окружения (Syncthing
-mount, ручное создание), не бота.
-
-При старте — явная проверка, fail fast:
-
-```rust
-let root = PathBuf::from(&config.root);
-
-if !root.is_dir() {
-    panic!(
-        "ROOT path {:?} does not exist or is not a directory. \
-         Create it manually (or check Syncthing mount) before starting the bot.",
-        root
-    );
-}
-```
-
-Молчаливое создание скрывает реальную проблему конфигурации (опечатка в
-пути, не смонтированный volume) — бот в этом случае тихо начнёт писать в
-новую пустую директорию, и заметки физически не попадут в vault.
 
 ## Что нужно агенту для старта
 
@@ -171,13 +92,6 @@ file = "Cargo.toml"
   **никогда**, даже если пользователь не упомянул `.gitignore` явно.
   Проверить наличие `.env` в `.gitignore` перед первым коммитом в новом
   проекте
-
-## Структура модулей
-
-`mod.rs` — только объявления и реэкспорты подмодулей (`pub mod x;`,
-`pub use x::*;`). **Никакой бизнес-логики в `mod.rs`.** Если модуль
-достаточно мал, чтобы уместиться в одном файле — это всё равно отдельный
-файл с содержательным именем (`inbox.rs`, `topics.rs`), не `mod.rs`.
 
 ## Правила работы и коммитов для агента
 
