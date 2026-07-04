@@ -63,81 +63,99 @@ async fn handle_message(
         None => return Ok(()),
     };
 
+    let explicit_title = extract_explicit_title(text);
+    let has_marker = explicit_title.is_some();
+
+    let title_raw = match explicit_title {
+        Some(t) => t,
+        None => first_line(text),
+    };
+    let title = truncate_at_word_boundary(title_raw, TITLE_MAX_LEN);
+    let slug = slugify(title);
+
+    let content = text.lines().skip(1).collect::<Vec<_>>().join("\n");
+
     let mut buf = buffer.lock().await;
 
-    if let Some(ref mut active) = *buf {
-        active.close_handle.abort();
-
-        let mut file = tokio::fs::OpenOptions::new()
-            .append(true)
-            .open(&active.file_path)
-            .await?;
-
-        use tokio::io::AsyncWriteExt;
-        file.write_all(format!("\n\n{}\n", text).as_bytes()).await?;
-
-        let feedback_msg_id = active.feedback_msg_id;
-        let filename = active.file_path.file_name()
-            .and_then(|f| f.to_str())
-            .unwrap_or("unknown")
-            .to_string();
-        let buffer_clone = buffer.clone();
-        let debounce_secs = config.debounce_secs;
-        let bot_clone = bot.clone();
-        let chat_id = ChatId(config.chat_id);
-
-        active.close_handle = tokio::spawn(async move {
-            start_countdown(bot_clone, chat_id, feedback_msg_id, &filename, debounce_secs, buffer_clone).await;
-        });
-    } else {
-        let title = truncate_at_word_boundary(first_line(text), TITLE_MAX_LEN);
-        let slug = slugify(title);
-        let now = Local::now();
-        let mut filename = format!("{}_{}.md", now.format("%Y-%m-%d_%H-%M"), slug);
-
-        let root = Path::new(&config.root);
-
-        let mut file_path = root.join(&filename);
-        let mut counter = 2;
-        while file_path.exists() {
-            filename = format!("{}_{}-{}.md", now.format("%Y-%m-%d_%H-%M"), slug, counter);
-            file_path = root.join(&filename);
-            counter += 1;
+    if has_marker {
+        if let Some(ref mut active) = *buf {
+            active.close_handle.abort();
+            *buf = None;
         }
+    } else {
+        if let Some(ref mut active) = *buf {
+            active.close_handle.abort();
 
-        let frontmatter = format!(
-            "---\ncreated: {}\nsource: telegram\n---\n\n",
-            now.to_rfc3339()
-        );
+            let mut file = tokio::fs::OpenOptions::new()
+                .append(true)
+                .open(&active.file_path)
+                .await?;
 
-        let content = text.lines().skip(1).collect::<Vec<_>>().join("\n");
-        tokio::fs::write(&file_path, format!("{}{}\n", frontmatter, content)).await?;
+            use tokio::io::AsyncWriteExt;
+            file.write_all(format!("\n\n{}\n", content).as_bytes()).await?;
 
-        let chat_id = ChatId(config.chat_id);
-        let thread_id = config.thread_ids.quick_notes.map(|id| ThreadId(MessageId(id)));
-        let initial_text = format!("Файл сохранён: {}\n\nОкно: {} сек", filename, config.debounce_secs);
+            let feedback_msg_id = active.feedback_msg_id;
+            let filename = active.file_path.file_name()
+                .and_then(|f| f.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let buffer_clone = buffer.clone();
+            let debounce_secs = config.debounce_secs;
+            let bot_clone = bot.clone();
+            let chat_id = ChatId(config.chat_id);
 
-        let feedback_msg = bot
-            .send_message(chat_id, &initial_text)
-            .message_thread_id(thread_id.unwrap_or(ThreadId(MessageId(0))))
-            .await?;
+            active.close_handle = tokio::spawn(async move {
+                start_countdown(bot_clone, chat_id, feedback_msg_id, &filename, debounce_secs, buffer_clone).await;
+            });
 
-        let feedback_msg_id = feedback_msg.id;
-        let buffer_clone = buffer.clone();
-        let debounce_secs = config.debounce_secs;
-        let bot_clone = bot.clone();
-        let filename_clone = filename.clone();
-
-        let close_handle = tokio::spawn(async move {
-            start_countdown(bot_clone, chat_id, feedback_msg_id, &filename_clone, debounce_secs, buffer_clone).await;
-        });
-
-        *buf = Some(InboxBuffer {
-            file_path,
-            close_handle,
-            feedback_msg_id,
-        });
+            return Ok(());
+        }
     }
+
+    let now = Local::now();
+    let mut filename = format!("{}_{}.md", now.format("%Y-%m-%d_%H-%M"), slug);
+
+    let root = Path::new(&config.root);
+
+    let mut file_path = root.join(&filename);
+    let mut counter = 2;
+    while file_path.exists() {
+        filename = format!("{}_{}-{}.md", now.format("%Y-%m-%d_%H-%M"), slug, counter);
+        file_path = root.join(&filename);
+        counter += 1;
+    }
+
+    let frontmatter = format!(
+        "---\ncreated: {}\nsource: telegram\n---\n\n",
+        now.to_rfc3339()
+    );
+
+    tokio::fs::write(&file_path, format!("{}{}\n", frontmatter, content)).await?;
+
+    let chat_id = ChatId(config.chat_id);
+    let thread_id = config.thread_ids.quick_notes.map(|id| ThreadId(MessageId(id)));
+    let initial_text = format!("Файл сохранён: {}\n\nОкно: {} сек", filename, config.debounce_secs);
+
+    let feedback_msg = bot
+        .send_message(chat_id, &initial_text)
+        .message_thread_id(thread_id.unwrap_or(ThreadId(MessageId(0))))
+        .await?;
+
+    let feedback_msg_id = feedback_msg.id;
+    let buffer_clone = buffer.clone();
+    let debounce_secs = config.debounce_secs;
+    let bot_clone = bot.clone();
+    let filename_clone = filename.clone();
+
+    let close_handle = tokio::spawn(async move {
+        start_countdown(bot_clone, chat_id, feedback_msg_id, &filename_clone, debounce_secs, buffer_clone).await;
+    });
+
+    *buf = Some(InboxBuffer {
+        file_path,
+        close_handle,
+        feedback_msg_id,
+    });
 
     Ok(())
 }
@@ -179,6 +197,13 @@ fn slugify(s: &str) -> String {
 
 fn first_line(text: &str) -> &str {
     text.lines().next().unwrap_or(text)
+}
+
+fn extract_explicit_title(text: &str) -> Option<&str> {
+    let first = text.lines().next().unwrap_or(text);
+    let rest = first.strip_prefix('!')?;
+    let trimmed = rest.trim();
+    if trimmed.is_empty() { None } else { Some(trimmed) }
 }
 
 fn truncate_at_word_boundary(s: &str, max_len: usize) -> &str {
