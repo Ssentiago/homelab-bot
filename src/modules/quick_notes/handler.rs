@@ -110,7 +110,8 @@ async fn handle_message(
             now.to_rfc3339()
         );
 
-        tokio::fs::write(&file_path, format!("{}{}\n", frontmatter, text)).await?;
+        let content = text.lines().skip(1).collect::<Vec<_>>().join("\n");
+        tokio::fs::write(&file_path, format!("{}{}\n", frontmatter, content)).await?;
 
         let chat_id = ChatId(config.chat_id);
         let thread_id = config.thread_ids.quick_notes.map(|id| ThreadId(MessageId(id)));
