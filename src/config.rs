@@ -18,6 +18,7 @@ pub struct Config {
     pub chat_id: i64,
     pub thread_ids: ThreadIds,
     pub notify_server_port: u16,
+    pub root: String,
 }
 
 impl Config {
@@ -33,6 +34,7 @@ impl Config {
                 .unwrap_or_else(|_| "8787".to_string())
                 .parse()
                 .expect("NOTIFY_SERVER_PORT must be a valid u16"),
+            root: env::var("ROOT").expect("ROOT must be set"),
         }
     }
 
