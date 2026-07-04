@@ -19,6 +19,7 @@ pub struct Config {
     pub thread_ids: ThreadIds,
     pub notify_server_port: u16,
     pub root: String,
+    pub debounce_secs: u64,
 }
 
 impl Config {
@@ -35,6 +36,10 @@ impl Config {
                 .parse()
                 .expect("NOTIFY_SERVER_PORT must be a valid u16"),
             root: env::var("ROOT").expect("ROOT must be set"),
+            debounce_secs: env::var("DEBOUNCE_SECS")
+                .unwrap_or_else(|_| "45".to_string())
+                .parse()
+                .expect("DEBOUNCE_SECS must be a valid u64"),
         }
     }
 
