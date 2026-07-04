@@ -13,6 +13,14 @@ use config::Config;
 
 #[tokio::main]
 async fn main() {
+    if std::env::args().any(|arg| arg == "--update") {
+        if let Err(e) = self_update() {
+            eprintln!("Update failed: {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
+
     dotenvy::dotenv().ok();
 
     tracing_subscriber::fmt()
@@ -69,4 +77,18 @@ async fn main() {
     }));
 
     let _ = tokio::join!(bot_task, http_task);
+}
+
+fn self_update() -> Result<(), Box<dyn std::error::Error>> {
+    let status = self_update::backends::github::Update::configure()
+        .repo_owner("Ssentiago")
+        .repo_name("homelab-bot")
+        .bin_name("homelab-bot")
+        .show_download_progress(true)
+        .no_confirm(true)
+        .current_version(self_update::cargo_crate_version!())
+        .build()?
+        .update()?;
+    println!("Updated to version {}", status.version());
+    Ok(())
 }
