@@ -16,4 +16,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures = "0.3"
 axum = { version = "0.7", features = ["multipart"] }
 tower-http = { version = "0.5", features = ["trace"] }
-self_update = { version = "1.0.0-rc.1", features = ["archive-tar", "compression-flate2"] }
+self_update = { version = "1.0.0-rc.1", default-features = false, features = ["archive-tar", "compression-flate2", "rustls"] }
