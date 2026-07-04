@@ -66,14 +66,14 @@ async fn handle_message(
     let explicit_title = extract_explicit_title(text);
     let has_marker = explicit_title.is_some();
 
-    let title_raw = match explicit_title {
-        Some(t) => t,
-        None => first_line(text),
+    let (slug, content) = if let Some(title_raw) = explicit_title {
+        let title = truncate_at_word_boundary(title_raw, TITLE_MAX_LEN);
+        let slug = slugify(title);
+        let content = text.lines().skip(1).collect::<Vec<_>>().join("\n");
+        (slug, content)
+    } else {
+        (String::new(), text.to_string())
     };
-    let title = truncate_at_word_boundary(title_raw, TITLE_MAX_LEN);
-    let slug = slugify(title);
-
-    let content = text.lines().skip(1).collect::<Vec<_>>().join("\n");
 
     let mut buf = buffer.lock().await;
 
@@ -92,7 +92,7 @@ async fn handle_message(
                 .await?;
 
             use tokio::io::AsyncWriteExt;
-            file.write_all(format!("\n\n{}\n", content).as_bytes()).await?;
+            file.write_all(format!("\n\n{}\n", text).as_bytes()).await?;
 
             let feedback_msg_id = active.feedback_msg_id;
             let filename = active.file_path.file_name()
@@ -113,15 +113,23 @@ async fn handle_message(
     }
 
     let now = Local::now();
-    let mut filename = format!("{}_{}.md", now.format("%Y-%m-%d_%H-%M"), slug);
+    let filename = if slug.is_empty() {
+        format!("{}.md", now.format("%Y-%m-%d_%H-%M"))
+    } else {
+        format!("{}_{}.md", now.format("%Y-%m-%d_%H-%M"), slug)
+    };
 
     let root = Path::new(&config.root);
 
     let mut file_path = root.join(&filename);
     let mut counter = 2;
     while file_path.exists() {
-        filename = format!("{}_{}-{}.md", now.format("%Y-%m-%d_%H-%M"), slug, counter);
-        file_path = root.join(&filename);
+        let new_filename = if slug.is_empty() {
+            format!("{}-{}.md", now.format("%Y-%m-%d_%H-%M"), counter)
+        } else {
+            format!("{}_{}-{}.md", now.format("%Y-%m-%d_%H-%M"), slug, counter)
+        };
+        file_path = root.join(&new_filename);
         counter += 1;
     }
 
@@ -193,10 +201,6 @@ fn slugify(s: &str) -> String {
         .collect::<Vec<_>>()
         .join("-");
     slug.trim_matches('-').to_string()
-}
-
-fn first_line(text: &str) -> &str {
-    text.lines().next().unwrap_or(text)
 }
 
 fn extract_explicit_title(text: &str) -> Option<&str> {
