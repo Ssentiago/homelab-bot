@@ -36,9 +36,11 @@ impl Config {
         self.notifications_thread_id.is_none() && self.quick_notes_thread_id.is_none()
     }
 
-    pub fn save_thread_ids(notifications: i32, quick_notes: i32) {
+    pub fn save_thread_ids(&mut self, notifications: i32, quick_notes: i32) {
         Self::update_env("NOTIFICATIONS_THREAD_ID", &notifications.to_string());
         Self::update_env("QUICK_NOTES_THREAD_ID", &quick_notes.to_string());
+        self.notifications_thread_id = Some(notifications);
+        self.quick_notes_thread_id = Some(quick_notes);
     }
 
     fn update_env(key: &str, value: &str) {
