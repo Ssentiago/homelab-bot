@@ -156,6 +156,10 @@ async fn start_countdown(
             .await;
     }
 
+    let _ = bot
+        .edit_message_text(chat_id, msg_id, format!("Файл сохранён: {}", filename))
+        .await;
+
     let mut buf = buffer.lock().await;
     *buf = None;
 }
