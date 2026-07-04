@@ -6,6 +6,7 @@ use teloxide::prelude::*;
 use teloxide::types::{ThreadId, MessageId};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+use tracing::info;
 
 use crate::config::Config;
 
@@ -23,7 +24,7 @@ pub fn new_buffer() -> ActiveBuffer {
 }
 
 pub async fn run(bot: Bot, config: Arc<Config>, buffer: ActiveBuffer) {
-    println!("Quick notes task started");
+    info!("Quick notes task started");
 
     let quick_notes_thread_id = config
         .thread_ids
@@ -35,10 +36,10 @@ pub async fn run(bot: Bot, config: Arc<Config>, buffer: ActiveBuffer) {
         let buffer = buffer.clone();
         let thread_id = quick_notes_thread_id;
         async move {
-            if let Some(thread_id) = thread_id {
-                if msg.thread_id == Some(thread_id) {
-                    handle_message(bot, msg, config, buffer).await?;
-                }
+            if let Some(thread_id) = thread_id
+                && msg.thread_id == Some(thread_id)
+            {
+                handle_message(bot, msg, config, buffer).await?;
             }
             Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
         }
@@ -64,16 +65,15 @@ async fn handle_message(
     let mut buf = buffer.lock().await;
 
     if let Some(ref mut active) = *buf {
-        // Buffer is active - append to existing file
         active.close_handle.abort();
 
-        let mut file = std::fs::OpenOptions::new()
+        let mut file = tokio::fs::OpenOptions::new()
             .append(true)
             .open(&active.file_path)
-            .expect("Failed to open note file");
+            .await?;
 
-        use std::io::Write;
-        writeln!(file, "\n\n{}\n", text).expect("Failed to write to note file");
+        use tokio::io::AsyncWriteExt;
+        file.write_all(format!("\n\n{}\n", text).as_bytes()).await?;
 
         let buffer_clone = buffer.clone();
         let debounce_secs = config.debounce_secs;
@@ -84,7 +84,6 @@ async fn handle_message(
             *buf = None;
         });
     } else {
-        // Buffer is empty - create new file
         let title = truncate_at_word_boundary(first_line(text), TITLE_MAX_LEN);
         let slug = slugify(title);
         let now = Local::now();
@@ -105,8 +104,7 @@ async fn handle_message(
             now.to_rfc3339()
         );
 
-        std::fs::write(&file_path, format!("{}{}\n", frontmatter, text))
-            .expect("Failed to write note file");
+        tokio::fs::write(&file_path, format!("{}{}\n", frontmatter, text)).await?;
 
         let buffer_clone = buffer.clone();
         let debounce_secs = config.debounce_secs;
@@ -146,14 +144,10 @@ fn truncate_at_word_boundary(s: &str, max_len: usize) -> &str {
     if s.chars().count() <= max_len {
         return s;
     }
-    match s.char_indices().take(max_len).last() {
-        Some((idx, _)) => {
-            let truncated = &s[..idx];
-            match truncated.rfind(' ') {
-                Some(space_idx) => &truncated[..space_idx],
-                None => truncated,
-            }
-        }
-        None => s,
-    }
+    let end = s.char_indices()
+        .nth(max_len)
+        .map(|(i, _)| i)
+        .unwrap_or(s.len());
+    let truncated = &s[..end];
+    truncated.rfind(' ').map_or(truncated, |i| &truncated[..i])
 }

@@ -1,5 +1,6 @@
 use teloxide::prelude::*;
 use teloxide::types::{ChatId, MessageId, ThreadId};
+use tracing::info;
 
 use crate::config::Config;
 
@@ -9,7 +10,7 @@ pub async fn ensure_topics_exist(bot: &Bot, config: &mut Config) -> anyhow::Resu
         return Ok(());
     }
 
-    println!("Creating forum topics...");
+    info!("Creating forum topics...");
 
     let notifications_topic = bot
         .create_forum_topic(ChatId(config.chat_id), "Уведомления")
@@ -22,12 +23,12 @@ pub async fn ensure_topics_exist(bot: &Bot, config: &mut Config) -> anyhow::Resu
     let notifications_id = notifications_topic.thread_id.0 .0;
     let quick_notes_id = quick_notes_topic.thread_id.0 .0;
 
-    println!("Created topics: notifications={}, quick_notes={}",
+    info!("Created topics: notifications={}, quick_notes={}",
         notifications_id, quick_notes_id
     );
 
     config.save_thread_ids(notifications_id, quick_notes_id);
-    println!("Thread IDs saved to config.json");
+    info!("Thread IDs saved to config.json");
 
     send_welcome_messages(bot, config).await?;
 
