@@ -14,5 +14,5 @@ chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures = "0.3"
-axum = "0.7"
+axum = { version = "0.7", features = ["multipart"] }
 tower-http = { version = "0.5", features = ["trace"] }
