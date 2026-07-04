@@ -1,0 +1,19 @@
+[project]
+name = "homelab-bot"
+repo = "Ssentiago/homelab-bot"
+branches = ["main"]
+
+changelog_type = "conventional"
+changelog = "CHANGELOG.md"
+
+release_mode = "local"
+
+[[components]]
+name = "main"
+path = "."
+build = "cross build --release --target x86_64-unknown-linux-gnu --no-default-features"
+artifact = "./target/x86_64-unknown-linux-gnu/release/homelab-bot"
+zip = false
+
+[[components.version_files]]
+file = "Cargo.toml"
