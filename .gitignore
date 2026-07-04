@@ -28,3 +28,6 @@ Cargo.lock
 
 # Secrets
 .env
+
+# Test scripts
+test_*.sh
