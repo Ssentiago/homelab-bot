@@ -23,8 +23,8 @@ async fn main() {
     }
 
     let config = Arc::new(config);
-    println!("Notifications thread: {:?}", config.notifications_thread_id);
-    println!("Quick notes thread: {:?}", config.quick_notes_thread_id);
+    println!("Notifications thread: {:?}", config.thread_ids.notifications);
+    println!("Quick notes thread: {:?}", config.thread_ids.quick_notes);
 
     let bot_handle = tokio::spawn(modules::quick_notes::run(bot.clone(), config.clone()));
     let http_handle = tokio::spawn(modules::http_notifications_server::run(bot.clone(), config.clone()));
