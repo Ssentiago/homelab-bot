@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use chrono::Local;
 use teloxide::prelude::*;
-use teloxide::types::{ThreadId, MessageId};
+use teloxide::types::{ChatId, MessageId, ThreadId};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tracing::info;
@@ -15,6 +15,7 @@ const TITLE_MAX_LEN: usize = 50;
 pub struct InboxBuffer {
     file_path: PathBuf,
     close_handle: JoinHandle<()>,
+    feedback_msg_id: MessageId,
 }
 
 pub type ActiveBuffer = Arc<Mutex<Option<InboxBuffer>>>;
@@ -52,7 +53,7 @@ pub async fn run(bot: Bot, config: Arc<Config>, buffer: ActiveBuffer) {
 }
 
 async fn handle_message(
-    _bot: Bot,
+    bot: Bot,
     msg: Message,
     config: Arc<Config>,
     buffer: ActiveBuffer,
@@ -75,13 +76,14 @@ async fn handle_message(
         use tokio::io::AsyncWriteExt;
         file.write_all(format!("\n\n{}\n", text).as_bytes()).await?;
 
+        let feedback_msg_id = active.feedback_msg_id;
         let buffer_clone = buffer.clone();
         let debounce_secs = config.debounce_secs;
+        let bot_clone = bot.clone();
+        let chat_id = ChatId(config.chat_id);
 
         active.close_handle = tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_secs(debounce_secs)).await;
-            let mut buf = buffer_clone.lock().await;
-            *buf = None;
+            start_countdown(bot_clone, chat_id, feedback_msg_id, debounce_secs, buffer_clone).await;
         });
     } else {
         let title = truncate_at_word_boundary(first_line(text), TITLE_MAX_LEN);
@@ -106,22 +108,54 @@ async fn handle_message(
 
         tokio::fs::write(&file_path, format!("{}{}\n", frontmatter, text)).await?;
 
+        let chat_id = ChatId(config.chat_id);
+        let thread_id = config.thread_ids.quick_notes.map(|id| ThreadId(MessageId(id)));
+        let initial_text = format!("Отправлено в {}\nОкно: {} сек", filename, config.debounce_secs);
+
+        let feedback_msg = bot
+            .send_message(chat_id, &initial_text)
+            .message_thread_id(thread_id.unwrap_or(ThreadId(MessageId(0))))
+            .await?;
+
+        let feedback_msg_id = feedback_msg.id;
         let buffer_clone = buffer.clone();
         let debounce_secs = config.debounce_secs;
+        let bot_clone = bot.clone();
 
         let close_handle = tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_secs(debounce_secs)).await;
-            let mut buf = buffer_clone.lock().await;
-            *buf = None;
+            start_countdown(bot_clone, chat_id, feedback_msg_id, debounce_secs, buffer_clone).await;
         });
 
         *buf = Some(InboxBuffer {
             file_path,
             close_handle,
+            feedback_msg_id,
         });
     }
 
     Ok(())
+}
+
+async fn start_countdown(
+    bot: Bot,
+    chat_id: ChatId,
+    msg_id: MessageId,
+    debounce_secs: u64,
+    buffer: ActiveBuffer,
+) {
+    for remaining in (1..debounce_secs).rev() {
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        let _ = bot
+            .edit_message_text(chat_id, msg_id, format!("Окно: {} сек", remaining))
+            .await;
+    }
+
+    let _ = bot
+        .edit_message_text(chat_id, msg_id, "Готово")
+        .await;
+
+    let mut buf = buffer.lock().await;
+    *buf = None;
 }
 
 fn slugify(s: &str) -> String {
