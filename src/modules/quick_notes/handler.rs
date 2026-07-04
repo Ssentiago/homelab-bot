@@ -77,13 +77,17 @@ async fn handle_message(
         file.write_all(format!("\n\n{}\n", text).as_bytes()).await?;
 
         let feedback_msg_id = active.feedback_msg_id;
+        let filename = active.file_path.file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or("unknown")
+            .to_string();
         let buffer_clone = buffer.clone();
         let debounce_secs = config.debounce_secs;
         let bot_clone = bot.clone();
         let chat_id = ChatId(config.chat_id);
 
         active.close_handle = tokio::spawn(async move {
-            start_countdown(bot_clone, chat_id, feedback_msg_id, debounce_secs, buffer_clone).await;
+            start_countdown(bot_clone, chat_id, feedback_msg_id, &filename, debounce_secs, buffer_clone).await;
         });
     } else {
         let title = truncate_at_word_boundary(first_line(text), TITLE_MAX_LEN);
@@ -110,7 +114,7 @@ async fn handle_message(
 
         let chat_id = ChatId(config.chat_id);
         let thread_id = config.thread_ids.quick_notes.map(|id| ThreadId(MessageId(id)));
-        let initial_text = format!("Отправлено в {}\nОкно: {} сек", filename, config.debounce_secs);
+        let initial_text = format!("Файл сохранён: {}\n\nОкно: {} сек", filename, config.debounce_secs);
 
         let feedback_msg = bot
             .send_message(chat_id, &initial_text)
@@ -121,9 +125,10 @@ async fn handle_message(
         let buffer_clone = buffer.clone();
         let debounce_secs = config.debounce_secs;
         let bot_clone = bot.clone();
+        let filename_clone = filename.clone();
 
         let close_handle = tokio::spawn(async move {
-            start_countdown(bot_clone, chat_id, feedback_msg_id, debounce_secs, buffer_clone).await;
+            start_countdown(bot_clone, chat_id, feedback_msg_id, &filename_clone, debounce_secs, buffer_clone).await;
         });
 
         *buf = Some(InboxBuffer {
@@ -140,19 +145,16 @@ async fn start_countdown(
     bot: Bot,
     chat_id: ChatId,
     msg_id: MessageId,
+    filename: &str,
     debounce_secs: u64,
     buffer: ActiveBuffer,
 ) {
     for remaining in (1..debounce_secs).rev() {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         let _ = bot
-            .edit_message_text(chat_id, msg_id, format!("Окно: {} сек", remaining))
+            .edit_message_text(chat_id, msg_id, format!("Файл сохранён: {}\n\nОкно: {} сек", filename, remaining))
             .await;
     }
-
-    let _ = bot
-        .edit_message_text(chat_id, msg_id, "Готово")
-        .await;
 
     let mut buf = buffer.lock().await;
     *buf = None;
