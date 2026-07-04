@@ -1,6 +1,7 @@
 mod config;
 mod modules;
 mod startup;
+mod supervisor;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -43,16 +44,29 @@ async fn main() {
     info!("Notifications thread: {:?}", config.thread_ids.notifications);
     info!("Quick notes thread: {:?}", config.thread_ids.quick_notes);
 
+    let bot_clone = bot.clone();
+    let config_clone = config.clone();
     let quick_notes_buffer = modules::quick_notes::handler::new_buffer();
-    let bot_handle = tokio::spawn(modules::quick_notes::handler::run(bot.clone(), config.clone(), quick_notes_buffer));
-    let http_handle = tokio::spawn(modules::http_notifications_server::run(bot.clone(), config.clone()));
 
-    tokio::select! {
-        res = bot_handle => {
-            info!("Bot task exited: {:?}", res);
+    let bot_task = tokio::spawn(supervisor::run_supervised("quick_notes", move || {
+        let bot = bot_clone.clone();
+        let config = config_clone.clone();
+        let buffer = quick_notes_buffer.clone();
+        async move {
+            modules::quick_notes::handler::run(bot, config, buffer).await;
         }
-        res = http_handle => {
-            info!("HTTP server task exited: {:?}", res);
+    }));
+
+    let bot_clone2 = bot.clone();
+    let config_clone2 = config.clone();
+
+    let http_task = tokio::spawn(supervisor::run_supervised("http_server", move || {
+        let bot = bot_clone2.clone();
+        let config = config_clone2.clone();
+        async move {
+            modules::http_notifications_server::run(bot, config).await;
         }
-    }
+    }));
+
+    let _ = tokio::join!(bot_task, http_task);
 }
