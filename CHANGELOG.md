@@ -1,3 +1,8 @@
+## [0.1.2] - 2026-07-05
+
+### Bug Fixes
+- install rustls ring provider at startup ([`34542a9`](https://github.com/Ssentiago/homelab-bot/commit/34542a99ff61236ae39413d15ca210accad898b4))
+
 ## [0.1.1] - 2026-07-05
 
 ### Refactoring
