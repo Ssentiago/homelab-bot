@@ -37,7 +37,7 @@ impl Config {
                 .parse()
                 .expect("NOTIFY_SERVER_PORT must be a valid u16"),
             notify_token: env::var("NOTIFY_TOKEN").expect("NOTIFY_TOKEN must be set"),
-            root: env::var("ROOT").expect("ROOT must be set"),
+            root: env::var("NOTES_ROOT").expect("NOTES_ROOT must be set"),
             debounce_secs: env::var("DEBOUNCE_SECS")
                 .unwrap_or_else(|_| "45".to_string())
                 .parse()

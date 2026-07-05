@@ -32,7 +32,7 @@ async fn main() {
     let root = PathBuf::from(&config.root);
     if !root.is_dir() {
         panic!(
-            "ROOT path {:?} does not exist or is not a directory. \
+            "NOTES_ROOT path {:?} does not exist or is not a directory. \
              Create it manually before starting the bot.",
             root
         );

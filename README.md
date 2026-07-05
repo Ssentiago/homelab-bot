@@ -27,7 +27,7 @@ cp .env.example .env
 |----------|-------------|------------|
 | `BOT_TOKEN` | Bot token | @BotFather → /mybots → API Token |
 | `CHAT_ID` | Private chat ID | [@userinfobot](https://t.me/userinfobot) |
-| `ROOT` | Folder for notes | Absolute path, e.g. `/home/user/notes` |
+| `NOTES_ROOT` | Folder for notes | Absolute path, e.g. `/home/user/notes` |
 | `NOTIFY_SERVER_PORT` | HTTP server port | Default `8787` |
 | `NOTIFY_TOKEN` | Token for HTTP requests | Any random string |
 | `DEBOUNCE_SECS` | Notes grouping window | Default `45` seconds |
