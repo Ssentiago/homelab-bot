@@ -1,3 +1,8 @@
+## [0.1.1] - 2026-07-05
+
+### Refactoring
+- rename ROOT env var to NOTES_ROOT ([`b7f64ff`](https://github.com/Ssentiago/homelab-bot/commit/b7f64ff854bb7d8a0e1ecd083351d1a3395e0464))
+
 ## [0.1.0]
 
 First release of Telegram bot for notes and notifications via Forum Topics.
