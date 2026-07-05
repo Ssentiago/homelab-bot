@@ -13,6 +13,10 @@ use config::Config;
 
 #[tokio::main]
 async fn main() {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("failed to install rustls ring provider");
+
     if std::env::args().any(|arg| arg == "--update") {
         if let Err(e) = self_update() {
             eprintln!("Update failed: {}", e);
