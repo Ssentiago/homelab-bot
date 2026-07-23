@@ -1,3 +1,8 @@
+## [0.3.0] - 2026-07-23
+
+### Features
+- add GET / help endpoint for notify server ([`fea32f1`](https://github.com/Ssentiago/homelab-bot/commit/fea32f1d18c3e8d97d54804487150e4c968e8a72))
+
 ## [0.2.0] - 2026-07-23
 
 ### Features
