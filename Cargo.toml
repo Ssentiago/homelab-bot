@@ -53,8 +53,6 @@ version = "1.0.0-rc.1"
 default-features = false
 features = [
     "reqwest",
-    "archive-tar",
-    "compression-flate2",
 ]
 
 [dependencies.rustls]
