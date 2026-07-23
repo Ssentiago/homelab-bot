@@ -5,7 +5,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     middleware::{self, Next},
     response::Response,
-    routing::post,
+    routing::{get, post},
     Json, Router,
 };
 use chrono::Local;
@@ -37,11 +37,16 @@ pub async fn start(bot: Bot, config: Arc<Config>) {
             state.clone(),
             auth_middleware,
         ))
+        .route("/", get(handle_help))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", config.notify_server_port);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     info!("HTTP server listening on {}", addr);
+    info!(
+        "Send notifications via: curl -X POST http://localhost:{}/notify -H \"Authorization: Bearer <token>\" -F \"message=...\"",
+        config.notify_server_port
+    );
 
     axum::serve(listener, app).await.unwrap();
 }
@@ -66,6 +71,27 @@ async fn auth_middleware(
     }
 
     Ok(next.run(request).await)
+}
+
+async fn handle_help(State(state): State<Arc<AppState>>) -> String {
+    format!(
+        "Homelab Bot notify server\n\n\
+         POST http://<host>:{port}/notify\n\
+         Authorization: Bearer <NOTIFY_TOKEN>\n\
+         Content-Type: multipart/form-data\n\n\
+         Fields:\n\
+         - message (required)\n\
+         - level (optional, default: info)\n\
+         - source (optional)\n\
+         - file (optional, attachment)\n\n\
+         Example:\n\
+         curl -X POST http://localhost:{port}/notify \\\n\
+         \x20\x20-H \"Authorization: Bearer <NOTIFY_TOKEN>\" \\\n\
+         \x20\x20-F \"message=Backup completed\" \\\n\
+         \x20\x20-F \"level=info\" \\\n\
+         \x20\x20-F \"source=backup-script\"\n",
+        port = state.config.notify_server_port
+    )
 }
 
 async fn handle_notify(
