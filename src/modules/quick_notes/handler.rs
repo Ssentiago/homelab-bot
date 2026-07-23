@@ -16,6 +16,7 @@ pub struct InboxBuffer {
     file_path: PathBuf,
     close_handle: JoinHandle<()>,
     feedback_msg_id: MessageId,
+    message_count: u32,
 }
 
 pub type ActiveBuffer = Arc<Mutex<Option<InboxBuffer>>>;
@@ -94,6 +95,8 @@ async fn handle_message(
             use tokio::io::AsyncWriteExt;
             file.write_all(format!("\n\n{}\n", text).as_bytes()).await?;
 
+            active.message_count += 1;
+            let message_count = active.message_count;
             let feedback_msg_id = active.feedback_msg_id;
             let filename = active.file_path.file_name()
                 .and_then(|f| f.to_str())
@@ -104,8 +107,13 @@ async fn handle_message(
             let bot_clone = bot.clone();
             let chat_id = ChatId(config.chat_id);
 
+            let append_text = format!("Добавлено в {}\nСообщений: {}\n\nОкно: {} сек", filename, message_count, debounce_secs);
+            let _ = bot
+                .edit_message_text(chat_id, feedback_msg_id, &append_text)
+                .await;
+
             active.close_handle = tokio::spawn(async move {
-                start_countdown(bot_clone, chat_id, feedback_msg_id, &filename, debounce_secs, buffer_clone).await;
+                start_countdown(bot_clone, chat_id, feedback_msg_id, &filename, message_count, debounce_secs, buffer_clone).await;
             });
 
             return Ok(());
@@ -142,7 +150,7 @@ async fn handle_message(
 
     let chat_id = ChatId(config.chat_id);
     let thread_id = config.thread_ids.quick_notes.map(|id| ThreadId(MessageId(id)));
-    let initial_text = format!("Файл сохранён: {}\n\nОкно: {} сек", filename, config.debounce_secs);
+    let initial_text = format!("Файл сохранён: {}\nСообщений: 1\n\nОкно: {} сек", filename, config.debounce_secs);
 
     let feedback_msg = bot
         .send_message(chat_id, &initial_text)
@@ -156,13 +164,14 @@ async fn handle_message(
     let filename_clone = filename.clone();
 
     let close_handle = tokio::spawn(async move {
-        start_countdown(bot_clone, chat_id, feedback_msg_id, &filename_clone, debounce_secs, buffer_clone).await;
+        start_countdown(bot_clone, chat_id, feedback_msg_id, &filename_clone, 1, debounce_secs, buffer_clone).await;
     });
 
     *buf = Some(InboxBuffer {
         file_path,
         close_handle,
         feedback_msg_id,
+        message_count: 1,
     });
 
     Ok(())
@@ -173,18 +182,19 @@ async fn start_countdown(
     chat_id: ChatId,
     msg_id: MessageId,
     filename: &str,
+    message_count: u32,
     debounce_secs: u64,
     buffer: ActiveBuffer,
 ) {
     for remaining in (1..debounce_secs).rev() {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         let _ = bot
-            .edit_message_text(chat_id, msg_id, format!("Файл сохранён: {}\n\nОкно: {} сек", filename, remaining))
+            .edit_message_text(chat_id, msg_id, format!("Файл сохранён: {}\nСообщений: {}\n\nОкно: {} сек", filename, message_count, remaining))
             .await;
     }
 
     let _ = bot
-        .edit_message_text(chat_id, msg_id, format!("Файл сохранён: {}", filename))
+        .edit_message_text(chat_id, msg_id, format!("Файл сохранён: {}\nСообщений: {}", filename, message_count))
         .await;
 
     let mut buf = buffer.lock().await;
