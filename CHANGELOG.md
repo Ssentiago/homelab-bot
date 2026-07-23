@@ -1,3 +1,11 @@
+## [0.2.0] - 2026-07-23
+
+### Features
+- feedback message shows 'Added to' and message count ([`ae11f8f`](https://github.com/Ssentiago/homelab-bot/commit/ae11f8fd0834c0abd9e432aec042ed8ab3536544))
+
+### Bug Fixes
+- use asset_identifier for self_update to find correct release asset ([`ce73f4a`](https://github.com/Ssentiago/homelab-bot/commit/ce73f4abbdfa92014009b7cfb4a39eb95c69fd0a))
+
 ## [0.1.2] - 2026-07-05
 
 ### Bug Fixes
