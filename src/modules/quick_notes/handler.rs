@@ -4,7 +4,7 @@ use std::sync::Arc;
 use chrono::Local;
 use teloxide::prelude::*;
 use teloxide::types::{ChatId, MessageId, ThreadId};
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tracing::info;
 
@@ -25,32 +25,19 @@ pub fn new_buffer() -> ActiveBuffer {
     Arc::new(Mutex::new(None))
 }
 
-pub async fn run(bot: Bot, config: Arc<Config>, buffer: ActiveBuffer) {
+pub async fn run(bot: Bot, config: Arc<Config>, buffer: ActiveBuffer, mut rx: mpsc::Receiver<Message>) {
     info!("Quick notes task started");
 
-    let quick_notes_thread_id = config
-        .thread_ids
-        .quick_notes
-        .map(|id| ThreadId(MessageId(id)));
-
-    let handler = move |bot: Bot, msg: Message| {
+    while let Some(msg) = rx.recv().await {
+        let bot = bot.clone();
         let config = config.clone();
         let buffer = buffer.clone();
-        let thread_id = quick_notes_thread_id;
-        async move {
-            if let Some(thread_id) = thread_id
-                && msg.thread_id == Some(thread_id)
-            {
-                handle_message(bot, msg, config, buffer).await?;
+        tokio::spawn(async move {
+            if let Err(e) = handle_message(bot, msg, config, buffer).await {
+                tracing::error!("Error handling message: {}", e);
             }
-            Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
-        }
-    };
-
-    Dispatcher::builder(bot, Update::filter_message().endpoint(handler))
-        .build()
-        .dispatch()
-        .await;
+        });
+    }
 }
 
 async fn handle_message(

@@ -1,11 +1,13 @@
 mod config;
 mod modules;
+mod router;
 mod startup;
 mod supervisor;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use teloxide::prelude::*;
+use teloxide::types::{MessageId, ThreadId};
 use tracing::{info, error};
 use tracing_subscriber::EnvFilter;
 
@@ -56,31 +58,46 @@ async fn main() {
     info!("Notifications thread: {:?}", config.thread_ids.notifications);
     info!("Quick notes thread: {:?}", config.thread_ids.quick_notes);
 
-    let bot_clone = bot.clone();
-    let config_clone = config.clone();
-    let quick_notes_buffer = modules::quick_notes::handler::new_buffer();
+    let mut router = router::Router::new();
 
-    let bot_task = tokio::spawn(supervisor::run_supervised("quick_notes", move || {
-        let bot = bot_clone.clone();
-        let config = config_clone.clone();
-        let buffer = quick_notes_buffer.clone();
-        async move {
-            modules::quick_notes::handler::run(bot, config, buffer).await;
-        }
-    }));
+    let quick_notes_rx = if let Some(thread_id) = config.thread_ids.quick_notes {
+        let thread_id = ThreadId(MessageId(thread_id));
+        Some(router.register(thread_id))
+    } else {
+        None
+    };
+
+    let bot_clone = bot.clone();
+    let router_task = tokio::spawn(async move {
+        router.run(bot_clone).await;
+    });
 
     let bot_clone2 = bot.clone();
     let config_clone2 = config.clone();
 
-    let http_task = tokio::spawn(supervisor::run_supervised("http_server", move || {
+    let _quick_notes_task = if let Some(rx) = quick_notes_rx {
         let bot = bot_clone2.clone();
         let config = config_clone2.clone();
+        let buffer = modules::quick_notes::handler::new_buffer();
+        Some(tokio::spawn(async move {
+            modules::quick_notes::handler::run(bot, config, buffer, rx).await;
+        }))
+    } else {
+        None
+    };
+
+    let bot_clone3 = bot.clone();
+    let config_clone3 = config.clone();
+
+    let http_task = tokio::spawn(supervisor::run_supervised("http_server", move || {
+        let bot = bot_clone3.clone();
+        let config = config_clone3.clone();
         async move {
             modules::http_notifications_server::run(bot, config).await;
         }
     }));
 
-    let _ = tokio::join!(bot_task, http_task);
+    let _ = tokio::join!(router_task, http_task);
 }
 
 fn self_update() -> Result<(), Box<dyn std::error::Error>> {
