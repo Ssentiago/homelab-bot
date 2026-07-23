@@ -1,3 +1,8 @@
+## [0.3.1] - 2026-07-23
+
+### Bug Fixes
+- remove archive features from self_update — jrit uploads raw binary ([`4c8ed14`](https://github.com/Ssentiago/homelab-bot/commit/4c8ed1405e0c3a684c4f73143e0a9700700637be))
+
 ## [0.3.0] - 2026-07-23
 
 ### Features
