@@ -91,6 +91,7 @@ fn self_update() -> Result<(), Box<dyn std::error::Error>> {
         .show_download_progress(true)
         .no_confirm(true)
         .current_version(self_update::cargo_crate_version!())
+        .asset_identifier("homelab-bot")
         .build()?
         .update()?;
     println!("Updated to version {}", status.version());
