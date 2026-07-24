@@ -175,10 +175,10 @@ async fn handle_message(
     let chat_id = config.chat_id;
     let thread_id = config.thread_ids.quick_notes;
     let file_content_for_render = tokio::fs::read_to_string(&file_path).await?;
-    let render_content = strip_frontmatter(&file_content_for_render);
+    let render_content = render_for_display(&file_content_for_render);
 
     let rich_msg_id = rich_client
-        .open_window(chat_id, thread_id, config.debounce_secs, render_content)
+        .open_window(chat_id, thread_id, config.debounce_secs, &render_content)
         .await
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
 
@@ -228,14 +228,14 @@ async fn start_countdown(
     for remaining in (1..debounce_secs).rev() {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         if let Ok(content) = tokio::fs::read_to_string(&file_path).await {
-            let render_content = strip_frontmatter(&content);
-            let _ = rich_client.update_window(chat_id, msg_id.0, Some(remaining), None, render_content).await;
+            let render_content = render_for_display(&content);
+            let _ = rich_client.update_window(chat_id, msg_id.0, Some(remaining), None, &render_content).await;
         }
     }
 
     if let Ok(content) = tokio::fs::read_to_string(&file_path).await {
-        let render_content = strip_frontmatter(&content);
-        let _ = rich_client.update_window(chat_id, msg_id.0, None, Some(&filename), render_content).await;
+        let render_content = render_for_display(&content);
+        let _ = rich_client.update_window(chat_id, msg_id.0, None, Some(&filename), &render_content).await;
     }
 
     let mut buf = buffer.lock().await;
@@ -279,4 +279,10 @@ fn strip_frontmatter(content: &str) -> &str {
         .and_then(|s| s.find("\n---\n"))
         .map(|end| &content[end + 5..])
         .unwrap_or(content)
+}
+
+fn render_for_display(content: &str) -> String {
+    let without_frontmatter = strip_frontmatter(content);
+    let re = regex::Regex::new(r"(?m)^---\d+---").unwrap();
+    re.replace_all(without_frontmatter, "").to_string()
 }
