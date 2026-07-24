@@ -11,6 +11,7 @@ use tracing::error;
 
 use crate::config::Config;
 
+#[derive(Clone)]
 pub struct RichClient {
     api: Bot,
 }

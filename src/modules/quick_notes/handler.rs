@@ -11,6 +11,7 @@ use tracing::info;
 
 use crate::config::Config;
 use super::format;
+use super::rich_client::RichClient;
 
 const TITLE_MAX_LEN: usize = 50;
 
@@ -36,8 +37,9 @@ pub async fn run(bot: Bot, config: Arc<Config>, buffer: ActiveBuffer, mut rx: mp
         let bot = bot.clone();
         let config = config.clone();
         let buffer = buffer.clone();
+        let rich_client = RichClient::new(&config);
         tokio::spawn(async move {
-            if let Err(e) = handle_message(bot, msg, config, buffer).await {
+            if let Err(e) = handle_message(bot, msg, config, buffer, &rich_client).await {
                 tracing::error!("Error handling message: {}", e);
             }
         });
@@ -49,6 +51,7 @@ async fn handle_message(
     msg: Message,
     config: Arc<Config>,
     buffer: ActiveBuffer,
+    rich_client: &RichClient,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let text = match msg.text() {
         Some(t) => t,
@@ -114,24 +117,19 @@ async fn handle_message(
             tokio::fs::write(&active.file_path, &new_content).await?;
 
             active.message_count += 1;
-            let message_count = active.message_count;
             let feedback_msg_id = active.feedback_msg_id;
-            let filename = active.file_path.file_name()
-                .and_then(|f| f.to_str())
-                .unwrap_or("unknown")
-                .to_string();
             let buffer_clone = buffer.clone();
             let debounce_secs = config.debounce_secs;
-            let bot_clone = bot.clone();
-            let chat_id = ChatId(config.chat_id);
+            let chat_id = config.chat_id;
+            let rich_client_clone = rich_client.clone();
 
-            let append_text = format!("Добавлено в {}\nСообщений: {}\n\nОкно: {} сек", filename, message_count, debounce_secs);
-            let _ = bot
-                .edit_message_text(chat_id, feedback_msg_id, &append_text)
+            let file_content_for_render = tokio::fs::read_to_string(&active.file_path).await?;
+            let _ = rich_client
+                .update_window(chat_id, feedback_msg_id.0, debounce_secs, &file_content_for_render)
                 .await;
 
             active.close_handle = tokio::spawn(async move {
-                start_countdown(bot_clone, chat_id, feedback_msg_id, &filename, message_count, debounce_secs, buffer_clone).await;
+                start_countdown(rich_client_clone, chat_id, feedback_msg_id, debounce_secs, buffer_clone).await;
             });
 
             return Ok(());
@@ -167,23 +165,22 @@ async fn handle_message(
     let file_content = format!("{}---1---\n{}\n", frontmatter, content);
     tokio::fs::write(&file_path, &file_content).await?;
 
-    let chat_id = ChatId(config.chat_id);
-    let thread_id = config.thread_ids.quick_notes.map(|id| ThreadId(MessageId(id)));
-    let initial_text = format!("Файл сохранён: {}\nСообщений: 1\n\nОкно: {} сек", filename, config.debounce_secs);
+    let chat_id = config.chat_id;
+    let thread_id = config.thread_ids.quick_notes;
+    let file_content_for_render = tokio::fs::read_to_string(&file_path).await?;
 
-    let feedback_msg = bot
-        .send_message(chat_id, &initial_text)
-        .message_thread_id(thread_id.unwrap_or(ThreadId(MessageId(0))))
-        .await?;
+    let rich_msg_id = rich_client
+        .open_window(chat_id, thread_id, config.debounce_secs, &file_content_for_render)
+        .await
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
 
-    let feedback_msg_id = feedback_msg.id;
+    let feedback_msg_id = MessageId(rich_msg_id);
     let buffer_clone = buffer.clone();
     let debounce_secs = config.debounce_secs;
-    let bot_clone = bot.clone();
-    let filename_clone = filename.clone();
+    let rich_client_clone = rich_client.clone();
 
     let close_handle = tokio::spawn(async move {
-        start_countdown(bot_clone, chat_id, feedback_msg_id, &filename_clone, 1, debounce_secs, buffer_clone).await;
+        start_countdown(rich_client_clone, chat_id, feedback_msg_id, debounce_secs, buffer_clone).await;
     });
 
     let mut message_ids = HashMap::new();
@@ -202,24 +199,25 @@ async fn handle_message(
 }
 
 async fn start_countdown(
-    bot: Bot,
-    chat_id: ChatId,
+    rich_client: RichClient,
+    chat_id: i64,
     msg_id: MessageId,
-    filename: &str,
-    message_count: u32,
     debounce_secs: u64,
     buffer: ActiveBuffer,
 ) {
+    let file_path = {
+        let buf = buffer.lock().await;
+        buf.as_ref().map(|b| b.file_path.clone())
+    };
+
+    let Some(file_path) = file_path else { return };
+
     for remaining in (1..debounce_secs).rev() {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        let _ = bot
-            .edit_message_text(chat_id, msg_id, format!("Файл сохранён: {}\nСообщений: {}\n\nОкно: {} сек", filename, message_count, remaining))
-            .await;
+        if let Ok(content) = tokio::fs::read_to_string(&file_path).await {
+            let _ = rich_client.update_window(chat_id, msg_id.0, remaining, &content).await;
+        }
     }
-
-    let _ = bot
-        .edit_message_text(chat_id, msg_id, format!("Файл сохранён: {}\nСообщений: {}", filename, message_count))
-        .await;
 
     let mut buf = buffer.lock().await;
     *buf = None;
