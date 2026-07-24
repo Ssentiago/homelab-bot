@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::{
@@ -13,7 +13,7 @@ use axum::{
 };
 use serde::Serialize;
 use teloxide::prelude::*;
-use tokio::sync::Mutex;
+use tokio::time::Instant;
 use tracing::info;
 
 use crate::config::Config;
@@ -30,9 +30,10 @@ struct AppState {
     config: Arc<Config>,
     dedup_cache: Mutex<DedupCache>,
     queue: TaskQueue,
+    alive: Arc<Mutex<Instant>>,
 }
 
-pub async fn start(bot: Bot, config: Arc<Config>, queue: TaskQueue) {
+pub async fn start(bot: Bot, config: Arc<Config>, queue: TaskQueue, alive: Arc<Mutex<Instant>>) {
     info!("HTTP notifications server task started on port {}", config.notify_server_port);
 
     let state = Arc::new(AppState {
@@ -40,6 +41,7 @@ pub async fn start(bot: Bot, config: Arc<Config>, queue: TaskQueue) {
         config: config.clone(),
         dedup_cache: Mutex::new(DedupCache::new(Duration::from_secs(300))),
         queue,
+        alive,
     });
 
     let app = Router::new()
@@ -109,6 +111,7 @@ async fn handle_notify(
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    *state.alive.lock().unwrap() = Instant::now();
     let mut message = None;
     let mut level = "info".to_string();
     let mut source = None;

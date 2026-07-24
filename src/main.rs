@@ -1,6 +1,7 @@
 mod config;
 mod db;
 mod dedup;
+mod heartbeat;
 mod modules;
 mod queue;
 mod router;
@@ -17,6 +18,7 @@ use tracing::{info, error};
 use tracing_subscriber::EnvFilter;
 
 use config::Config;
+use heartbeat::{Heartbeat, ModuleHandle};
 use stats::BotStart;
 
 #[tokio::main]
@@ -70,6 +72,45 @@ async fn main() {
 
     let bot_start = Arc::new(BotStart::now());
 
+    let heartbeat = Arc::new(Heartbeat::new());
+
+    // Register quick_notes health check
+    let qn_alive = Arc::new(std::sync::Mutex::new(tokio::time::Instant::now()));
+    let qn_root = config.root.clone();
+    heartbeat.register(ModuleHandle {
+        name: "quick_notes".into(),
+        last_alive: qn_alive.clone(),
+        check: Box::new(move || {
+            let root = std::path::Path::new(&qn_root);
+            if !root.is_dir() {
+                return Err("NOTES_ROOT missing".into());
+            }
+            let test = root.join(".health_check");
+            std::fs::write(&test, b"").map_err(|e| format!("disk: {}", e))?;
+            std::fs::remove_file(&test).ok();
+            Ok(())
+        }),
+    });
+
+    // Register notifications health check
+    let nf_alive = Arc::new(std::sync::Mutex::new(tokio::time::Instant::now()));
+    let nf_port = config.notify_server_port;
+    heartbeat.register(ModuleHandle {
+        name: "notifications".into(),
+        last_alive: nf_alive.clone(),
+        check: Box::new(move || {
+            let addr = format!("127.0.0.1:{}", nf_port);
+            std::net::TcpStream::connect_timeout(
+                &addr.parse().map_err(|e| format!("parse: {}", e))?,
+                std::time::Duration::from_secs(2),
+            )
+            .map(|_| ())
+            .map_err(|e| format!("port: {}", e))
+        }),
+    });
+
+    heartbeat::spawn(bot.clone(), heartbeat.clone());
+
     stats::spawn_cleanup(pool.clone());
 
     let notifications_queue = queue::TaskQueue::new(pool.clone(), "pending_notifications");
@@ -105,7 +146,7 @@ async fn main() {
         let config = config_clone2.clone();
         let buffer = modules::quick_notes::handler::new_buffer();
         Some(tokio::spawn(async move {
-            modules::quick_notes::handler::run(bot, config, notes_pool, buffer, rx, callback_rx).await;
+            modules::quick_notes::handler::run(bot, config, notes_pool, qn_alive.clone(), buffer, rx, callback_rx).await;
         }))
     } else {
         None
@@ -119,8 +160,9 @@ async fn main() {
         let bot = bot_clone3.clone();
         let config = config_clone3.clone();
         let queue = queue::TaskQueue::new(server_pool.clone(), "pending_notifications");
+        let alive = nf_alive.clone();
         async move {
-            modules::http_notifications_server::run(bot, config, queue).await;
+            modules::http_notifications_server::run(bot, config, queue, alive).await;
         }
     }));
 

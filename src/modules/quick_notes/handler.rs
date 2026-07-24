@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use chrono::Local;
 use sqlx::SqlitePool;
@@ -8,6 +8,7 @@ use teloxide::prelude::*;
 use teloxide::types::MessageId;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use tracing::info;
 
 use crate::config::Config;
@@ -36,6 +37,7 @@ pub async fn run(
     bot: Bot,
     config: Arc<Config>,
     pool: SqlitePool,
+    alive: Arc<StdMutex<Instant>>,
     buffer: ActiveBuffer,
     mut rx: mpsc::Receiver<Message>,
     mut callback_rx: mpsc::Receiver<teloxide::types::CallbackQuery>,
@@ -58,6 +60,7 @@ pub async fn run(
     });
 
     while let Some(msg) = rx.recv().await {
+        *alive.lock().unwrap() = Instant::now();
         let bot = bot.clone();
         let config = config.clone();
         let buffer = buffer.clone();
