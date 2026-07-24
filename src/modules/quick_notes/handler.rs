@@ -99,17 +99,21 @@ async fn handle_message(
         if let Some(ref mut active) = *buf
             && let Some(&seq) = active.message_ids.get(&msg.id)
         {
+            active.close_handle.abort();
+
             let content = tokio::fs::read_to_string(&active.file_path).await?;
             let new_content = format::replace_message(&content, seq, text);
             tokio::fs::write(&active.file_path, &new_content).await?;
 
-            let file_content_for_render = tokio::fs::read_to_string(&active.file_path).await?;
-            let render_content = strip_frontmatter(&file_content_for_render);
+            let buffer_clone = buffer.clone();
+            let debounce_secs = config.debounce_secs;
             let chat_id = config.chat_id;
             let feedback_msg_id = active.feedback_msg_id;
-            let _ = rich_client
-                .update_window(chat_id, feedback_msg_id.0, Some(config.debounce_secs), None, render_content)
-                .await;
+            let rich_client_clone = rich_client.clone();
+
+            active.close_handle = tokio::spawn(async move {
+                start_countdown(rich_client_clone, chat_id, feedback_msg_id, debounce_secs, buffer_clone).await;
+            });
         }
         return Ok(());
     } else {
@@ -130,12 +134,6 @@ async fn handle_message(
             let debounce_secs = config.debounce_secs;
             let chat_id = config.chat_id;
             let rich_client_clone = rich_client.clone();
-
-            let file_content_for_render = tokio::fs::read_to_string(&active.file_path).await?;
-            let render_content = strip_frontmatter(&file_content_for_render);
-            let _ = rich_client
-                .update_window(chat_id, feedback_msg_id.0, Some(debounce_secs), None, render_content)
-                .await;
 
             active.close_handle = tokio::spawn(async move {
                 start_countdown(rich_client_clone, chat_id, feedback_msg_id, debounce_secs, buffer_clone).await;
