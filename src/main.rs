@@ -64,7 +64,7 @@ async fn main() {
 
     let pool = db::init_db().await;
 
-    worker::spawn_notification_worker(pool, bot.clone(), config.clone());
+    worker::spawn_notification_worker(pool.clone(), bot.clone(), config.clone());
 
     let mut router = router::Router::new();
 
@@ -102,8 +102,9 @@ async fn main() {
     let http_task = tokio::spawn(supervisor::run_supervised("http_server", move || {
         let bot = bot_clone3.clone();
         let config = config_clone3.clone();
+        let pool = pool.clone();
         async move {
-            modules::http_notifications_server::run(bot, config).await;
+            modules::http_notifications_server::run(bot, config, pool).await;
         }
     }));
 
