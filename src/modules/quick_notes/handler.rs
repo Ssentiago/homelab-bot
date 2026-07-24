@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use chrono::Local;
 use teloxide::prelude::*;
-use teloxide::types::{ChatId, MessageId, ThreadId};
+use teloxide::types::MessageId;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tracing::info;
@@ -30,8 +30,29 @@ pub fn new_buffer() -> ActiveBuffer {
     Arc::new(Mutex::new(None))
 }
 
-pub async fn run(bot: Bot, config: Arc<Config>, buffer: ActiveBuffer, mut rx: mpsc::Receiver<Message>) {
+pub async fn run(
+    bot: Bot,
+    config: Arc<Config>,
+    buffer: ActiveBuffer,
+    mut rx: mpsc::Receiver<Message>,
+    mut callback_rx: mpsc::Receiver<teloxide::types::CallbackQuery>,
+) {
     info!("Quick notes task started");
+
+    let buffer_clone = buffer.clone();
+    let config_clone = config.clone();
+    let bot_clone = bot.clone();
+
+    tokio::spawn(async move {
+        while let Some(query) = callback_rx.recv().await {
+            let bot = bot_clone.clone();
+            let config = config_clone.clone();
+            let buffer = buffer_clone.clone();
+            tokio::spawn(async move {
+                handle_callback(bot, query, config, buffer).await;
+            });
+        }
+    });
 
     while let Some(msg) = rx.recv().await {
         let bot = bot.clone();
@@ -47,7 +68,7 @@ pub async fn run(bot: Bot, config: Arc<Config>, buffer: ActiveBuffer, mut rx: mp
 }
 
 async fn handle_message(
-    bot: Bot,
+    _bot: Bot,
     msg: Message,
     config: Arc<Config>,
     buffer: ActiveBuffer,
@@ -57,24 +78,6 @@ async fn handle_message(
         Some(t) => t,
         None => return Ok(()),
     };
-
-    if text == "." {
-        let mut buf = buffer.lock().await;
-        if let Some(active) = buf.take() {
-            active.close_handle.abort();
-            let chat_id = ChatId(config.chat_id);
-            let thread_id = config.thread_ids.quick_notes.map(|id| ThreadId(MessageId(id)));
-            let filename = active.file_path.file_name()
-                .and_then(|f| f.to_str())
-                .unwrap_or("unknown")
-                .to_string();
-            let _ = bot
-                .send_message(chat_id, format!("Окно закрыто: {}\nСообщений: {}", filename, active.message_count))
-                .message_thread_id(thread_id.unwrap_or(ThreadId(MessageId(0))))
-                .await;
-        }
-        return Ok(());
-    }
 
     let explicit_title = extract_explicit_title(text);
     let has_marker = explicit_title.is_some();
@@ -285,4 +288,42 @@ fn render_for_display(content: &str) -> String {
     let without_frontmatter = strip_frontmatter(content);
     let re = regex::Regex::new(r"(?m)^---\d+---").unwrap();
     re.replace_all(without_frontmatter, "").to_string()
+}
+
+async fn handle_callback(
+    _bot: Bot,
+    query: teloxide::types::CallbackQuery,
+    config: Arc<Config>,
+    buffer: ActiveBuffer,
+) {
+    let data = match query.data.as_deref() {
+        Some(d) => d,
+        None => return,
+    };
+
+    if data != "close_window" {
+        return;
+    }
+
+    let rich_client = RichClient::new(&config);
+    let callback_id = query.id.to_string();
+    let _ = rich_client.answer_callback(&callback_id).await;
+
+    let mut buf = buffer.lock().await;
+    if let Some(active) = buf.take() {
+        active.close_handle.abort();
+
+        let chat_id = config.chat_id;
+        let msg_id = query.message.as_ref().map(|m| m.id().0).unwrap_or(0);
+        let filename = active.file_path.file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let file_content = tokio::fs::read_to_string(&active.file_path).await.unwrap_or_default();
+        let render_content = render_for_display(&file_content);
+        let final_content = format!("Файл сохранён: {}\n\n{}", filename, render_content);
+
+        let _ = rich_client.update_window(chat_id, msg_id, None, Some(&filename), &final_content).await;
+    }
 }

@@ -67,6 +67,8 @@ async fn main() {
         None
     };
 
+    let callback_rx = router.register_callback();
+
     let bot_clone = bot.clone();
     let router_task = tokio::spawn(async move {
         router.run(bot_clone).await;
@@ -80,7 +82,7 @@ async fn main() {
         let config = config_clone2.clone();
         let buffer = modules::quick_notes::handler::new_buffer();
         Some(tokio::spawn(async move {
-            modules::quick_notes::handler::run(bot, config, buffer, rx).await;
+            modules::quick_notes::handler::run(bot, config, buffer, rx, callback_rx).await;
         }))
     } else {
         None

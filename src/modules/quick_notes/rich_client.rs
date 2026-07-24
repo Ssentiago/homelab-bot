@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use frankenstein::client_reqwest::Bot;
-use frankenstein::methods::{EditMessageTextParams, SendRichMessageParams};
+use frankenstein::methods::{AnswerCallbackQueryParams, EditMessageTextParams, SendRichMessageParams};
 use frankenstein::rich_message::InputRichMessage;
-use frankenstein::types::ChatId;
+use frankenstein::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup, ReplyMarkup};
 use frankenstein::AsyncTelegramApi;
 use tracing::error;
 
@@ -30,16 +30,19 @@ impl RichClient {
         content: &str,
     ) -> Result<i32, String> {
         let rich_message = build_rich_message(remaining_secs, content);
+        let keyboard = build_keyboard();
 
         let params = match thread_id {
             Some(tid) => SendRichMessageParams::builder()
                 .chat_id(ChatId::Integer(chat_id))
                 .message_thread_id(tid)
                 .rich_message(rich_message)
+                .reply_markup(ReplyMarkup::InlineKeyboardMarkup(keyboard))
                 .build(),
             None => SendRichMessageParams::builder()
                 .chat_id(ChatId::Integer(chat_id))
                 .rich_message(rich_message)
+                .reply_markup(ReplyMarkup::InlineKeyboardMarkup(keyboard))
                 .build(),
         };
 
@@ -80,6 +83,20 @@ impl RichClient {
             }
         }
     }
+
+    pub async fn answer_callback(&self, callback_query_id: &str) -> Result<(), String> {
+        let params = AnswerCallbackQueryParams::builder()
+            .callback_query_id(callback_query_id.to_string())
+            .build();
+
+        match self.api.answer_callback_query(&params).await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                error!("Failed to answer callback: {:?}", e);
+                Err(format!("answer_callback_query failed: {:?}", e))
+            }
+        }
+    }
 }
 
 fn build_rich_message(remaining_secs: u64, content: &str) -> InputRichMessage {
@@ -93,5 +110,16 @@ fn build_final_message(filename: &str, content: &str) -> InputRichMessage {
     let markdown = format!("# Файл сохранён: {}\n\n---\n\n{}", filename, content);
     InputRichMessage::builder()
         .markdown(markdown)
+        .build()
+}
+
+fn build_keyboard() -> InlineKeyboardMarkup {
+    let button = InlineKeyboardButton::builder()
+        .text("Остановить")
+        .callback_data("close_window")
+        .build();
+
+    InlineKeyboardMarkup::builder()
+        .inline_keyboard(vec![vec![button]])
         .build()
 }
