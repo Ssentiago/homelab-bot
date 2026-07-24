@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -9,6 +10,7 @@ use tokio::task::JoinHandle;
 use tracing::info;
 
 use crate::config::Config;
+use super::format;
 
 const TITLE_MAX_LEN: usize = 50;
 
@@ -17,6 +19,8 @@ pub struct InboxBuffer {
     close_handle: JoinHandle<()>,
     feedback_msg_id: MessageId,
     message_count: u32,
+    message_sequence: u32,
+    message_ids: HashMap<MessageId, u32>,
 }
 
 pub type ActiveBuffer = Arc<Mutex<Option<InboxBuffer>>>;
@@ -88,17 +92,26 @@ async fn handle_message(
             active.close_handle.abort();
             *buf = None;
         }
+    } else if msg.edit_date().is_some() {
+        if let Some(ref mut active) = *buf
+            && let Some(&seq) = active.message_ids.get(&msg.id)
+        {
+            let content = tokio::fs::read_to_string(&active.file_path).await?;
+            let new_content = format::replace_message(&content, seq, text);
+            tokio::fs::write(&active.file_path, &new_content).await?;
+        }
+        return Ok(());
     } else {
         if let Some(ref mut active) = *buf {
             active.close_handle.abort();
 
-            let mut file = tokio::fs::OpenOptions::new()
-                .append(true)
-                .open(&active.file_path)
-                .await?;
+            active.message_sequence += 1;
+            let seq = active.message_sequence;
+            active.message_ids.insert(msg.id, seq);
 
-            use tokio::io::AsyncWriteExt;
-            file.write_all(format!("\n\n{}\n", text).as_bytes()).await?;
+            let content = tokio::fs::read_to_string(&active.file_path).await?;
+            let new_content = format::append_message(&content, seq, text);
+            tokio::fs::write(&active.file_path, &new_content).await?;
 
             active.message_count += 1;
             let message_count = active.message_count;
@@ -151,7 +164,8 @@ async fn handle_message(
         now.to_rfc3339()
     );
 
-    tokio::fs::write(&file_path, format!("{}{}\n", frontmatter, content)).await?;
+    let file_content = format!("{}---1---\n{}\n", frontmatter, content);
+    tokio::fs::write(&file_path, &file_content).await?;
 
     let chat_id = ChatId(config.chat_id);
     let thread_id = config.thread_ids.quick_notes.map(|id| ThreadId(MessageId(id)));
@@ -172,11 +186,16 @@ async fn handle_message(
         start_countdown(bot_clone, chat_id, feedback_msg_id, &filename_clone, 1, debounce_secs, buffer_clone).await;
     });
 
+    let mut message_ids = HashMap::new();
+    message_ids.insert(msg.id, 1);
+
     *buf = Some(InboxBuffer {
         file_path,
         close_handle,
         feedback_msg_id,
         message_count: 1,
+        message_sequence: 1,
+        message_ids,
     });
 
     Ok(())

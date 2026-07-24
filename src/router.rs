@@ -44,7 +44,11 @@ impl Router {
 
         info!("Router started, dispatching messages");
 
-        Dispatcher::builder(bot, Update::filter_message().endpoint(handler))
+        let update_handler = Update::filter_message()
+            .chain(Update::filter_edited_message())
+            .endpoint(handler);
+
+        Dispatcher::builder(bot, update_handler)
             .build()
             .dispatch()
             .await;
