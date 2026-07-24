@@ -1,3 +1,32 @@
+## [0.4.0] - 2026-07-25
+
+### Features
+- replace welcome messages with ModuleHandle-based heartbeat ([`f67a55e`](https://github.com/Ssentiago/homelab-bot/commit/f67a55eb21ee5af9ce23e2c5d0be96925db243ca))
+- wire /status command with SQLite stats recording ([`d99c49c`](https://github.com/Ssentiago/homelab-bot/commit/d99c49cde851667f48caf7946f4d7f59de4e2c14))
+- add stats module and database table ([`6bc8390`](https://github.com/Ssentiago/homelab-bot/commit/6bc83903f44861c9974d5d5f61fbe1aff51dcb29))
+- add dedup module with 5-minute window cache ([`8dc27c3`](https://github.com/Ssentiago/homelab-bot/commit/8dc27c3dfb896ea18a90a9d3ab0147b9b49f153f))
+- generic TaskQueue with claim/mark functions ([`f39b554`](https://github.com/Ssentiago/homelab-bot/commit/f39b55421e4b73f24c6c05b54a95b2d1acdab48f))
+- integrate queue with notification server - producer inserts only ([`88a2530`](https://github.com/Ssentiago/homelab-bot/commit/88a25301588b6daca29c798aa0ec0d12759bc318))
+- SQLite task queue infrastructure for notifications ([`b358bb9`](https://github.com/Ssentiago/homelab-bot/commit/b358bb9c4ec9f5173646de53d72aa182915f3f4a))
+- replace dot close with inline keyboard button ([`7cf4643`](https://github.com/Ssentiago/homelab-bot/commit/7cf464368ca88cf2f6f68f2021ca5596d5ca82a0))
+- hide ---N--- separators in rich message display ([`8cee5cb`](https://github.com/Ssentiago/homelab-bot/commit/8cee5cbde0bd4e82184e64c0f933619ce3eaee00))
+- update rich message on message edit ([`b883267`](https://github.com/Ssentiago/homelab-bot/commit/b883267641319c41952b1f597fb531d8f073e647))
+- integrate rich_client into quick notes handler ([`50077cb`](https://github.com/Ssentiago/homelab-bot/commit/50077cbd8d8c155690cad4bbd60e31eb93912bdc))
+- rich_client.rs with markdown-based rich messages ([`3fa71a8`](https://github.com/Ssentiago/homelab-bot/commit/3fa71a8898ffd450122bc869caf698ac9ae35061))
+- edit messages sync with file via deterministic separators ([`9631470`](https://github.com/Ssentiago/homelab-bot/commit/9631470e20aaef5473ae70c366c58564484ed660))
+- deterministic message format helpers with regex ([`a07b63f`](https://github.com/Ssentiago/homelab-bot/commit/a07b63f323dbbd8147ddc03362ae7a2fe8a41eaf))
+- dot (.) closes active quick notes window ([`d64f0e9`](https://github.com/Ssentiago/homelab-bot/commit/d64f0e9e5b215ccd953ef5ab7aafce33a54f6906))
+
+### Bug Fixes
+- improve notifications health check and heartbeat sync display ([`e4c9d81`](https://github.com/Ssentiago/homelab-bot/commit/e4c9d81e7b84511fbf7e920c5ac06cf0729d0790))
+- preserve inline keyboard button during countdown updates ([`d56bc11`](https://github.com/Ssentiago/homelab-bot/commit/d56bc111517263271222cd7de732bd259dab6b81))
+- restart countdown on message edit + format separators ([`fcb5b58`](https://github.com/Ssentiago/homelab-bot/commit/fcb5b58678bdacffc591f71b1a8c8f9855b7c70d))
+- add double newline between separators and expand tests ([`56c1ede`](https://github.com/Ssentiago/homelab-bot/commit/56c1ede3bb872801d8ecb3129269e7618b9a04e7))
+- rich message polish — branch router, strip frontmatter, final heading, format separators ([`3e9d720`](https://github.com/Ssentiago/homelab-bot/commit/3e9d720f4b1d9660161aac28fd9657ad03bbd9ef))
+
+### Refactoring
+- central Router with mpsc dispatching ([`ca6fdd5`](https://github.com/Ssentiago/homelab-bot/commit/ca6fdd59f02b3f2bd100335afc6be6e758c17aa7))
+
 ## [0.3.1] - 2026-07-23
 
 ### Bug Fixes
