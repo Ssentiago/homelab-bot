@@ -12,14 +12,13 @@ use axum::{
     Json, Router,
 };
 use serde::Serialize;
-use sqlx::SqlitePool;
 use teloxide::prelude::*;
 use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::config::Config;
 use crate::dedup::DedupCache;
-use crate::queue;
+use crate::queue::{self, TaskQueue};
 
 #[derive(Serialize)]
 pub(crate) struct ErrorResponse {
@@ -30,17 +29,17 @@ struct AppState {
     bot: Bot,
     config: Arc<Config>,
     dedup_cache: Mutex<DedupCache>,
-    pool: SqlitePool,
+    queue: TaskQueue,
 }
 
-pub async fn start(bot: Bot, config: Arc<Config>, pool: SqlitePool) {
+pub async fn start(bot: Bot, config: Arc<Config>, queue: TaskQueue) {
     info!("HTTP notifications server task started on port {}", config.notify_server_port);
 
     let state = Arc::new(AppState {
         bot,
         config: config.clone(),
         dedup_cache: Mutex::new(DedupCache::new(Duration::from_secs(300))),
-        pool,
+        queue,
     });
 
     let app = Router::new()
@@ -164,13 +163,14 @@ async fn handle_notify(
 
     let chat_id = state.config.chat_id;
     let thread_id = state.config.thread_ids.notifications;
+    let text = format_notification(&message, &level, source.as_deref());
 
     let _ = queue::insert_notification(
-        &state.pool,
+        state.queue.pool(),
         chat_id,
         thread_id,
         "plain",
-        Some(&format_notification(&message, &level, source.as_deref())),
+        Some(&text),
         None,
         None,
     )

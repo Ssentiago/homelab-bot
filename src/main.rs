@@ -64,7 +64,10 @@ async fn main() {
 
     let pool = db::init_db().await;
 
-    worker::spawn_notification_worker(pool.clone(), bot.clone(), config.clone());
+    let notifications_queue = queue::TaskQueue::new(pool.clone(), "pending_notifications");
+    notifications_queue.init_table("chat_id INTEGER NOT NULL, thread_id INTEGER, kind TEXT NOT NULL DEFAULT 'plain', text TEXT, rich_markdown TEXT, edit_message_id INTEGER").await.expect("Failed to init notifications table");
+
+    worker::spawn_notification_worker(queue::TaskQueue::new(pool.clone(), "pending_notifications"), bot.clone(), config.clone());
 
     let mut router = router::Router::new();
 
@@ -102,9 +105,9 @@ async fn main() {
     let http_task = tokio::spawn(supervisor::run_supervised("http_server", move || {
         let bot = bot_clone3.clone();
         let config = config_clone3.clone();
-        let pool = pool.clone();
+        let queue = queue::TaskQueue::new(pool.clone(), "pending_notifications");
         async move {
-            modules::http_notifications_server::run(bot, config, pool).await;
+            modules::http_notifications_server::run(bot, config, queue).await;
         }
     }));
 

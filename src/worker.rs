@@ -1,26 +1,28 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use sqlx::SqlitePool;
+use sqlx::sqlite::SqliteRow;
+use sqlx::Row;
 use teloxide::prelude::*;
 use teloxide::types::{ChatId, MessageId, ThreadId};
 use tracing::{info, error};
 
 use crate::config::Config;
-use crate::queue::{self, PendingNotification};
+use crate::queue::TaskQueue;
 
-pub fn spawn_notification_worker(pool: SqlitePool, bot: Bot, _config: Arc<Config>) {
+pub fn spawn_notification_worker(queue: TaskQueue, bot: Bot, _config: Arc<Config>) {
     tokio::spawn(async move {
         info!("Notification worker started");
         loop {
-            match queue::claim_next_pending(&pool).await {
-                Ok(Some(task)) => {
-                    if let Err(e) = process_task(&bot, &task).await {
-                        error!("Task {} failed: {}", task.id, e);
-                        let _ = queue::mark_pending_retry(&pool, task.id, &e.to_string()).await;
+            match queue.claim_next().await {
+                Ok(Some(row)) => {
+                    let id: i64 = row.get("id");
+                    if let Err(e) = process_task(&bot, &row).await {
+                        error!("Task {} failed: {}", id, e);
+                        let _ = queue.mark_pending_retry(id, &e.to_string()).await;
                     } else {
-                        info!("Task {} completed", task.id);
-                        let _ = queue::mark_done(&pool, task.id).await;
+                        info!("Task {} completed", id);
+                        let _ = queue.mark_done(id).await;
                     }
                 }
                 Ok(None) => {
@@ -35,14 +37,14 @@ pub fn spawn_notification_worker(pool: SqlitePool, bot: Bot, _config: Arc<Config
     });
 }
 
-async fn process_task(
-    bot: &Bot,
-    task: &PendingNotification,
-) -> Result<(), String> {
-    let chat_id = ChatId(task.chat_id);
-    let thread_id = task.thread_id.map(|id| ThreadId(MessageId(id)));
+async fn process_task(bot: &Bot, row: &SqliteRow) -> Result<(), String> {
+    let chat_id: i64 = row.get("chat_id");
+    let thread_id: Option<i32> = row.get("thread_id");
+    let text: Option<String> = row.get("text");
 
-    bot.send_message(chat_id, task.text.as_deref().unwrap_or(""))
+    let thread_id = thread_id.map(|id| ThreadId(MessageId(id)));
+
+    bot.send_message(ChatId(chat_id), text.as_deref().unwrap_or(""))
         .message_thread_id(thread_id.unwrap_or(ThreadId(MessageId(0))))
         .send()
         .await
