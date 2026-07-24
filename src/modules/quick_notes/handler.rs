@@ -102,6 +102,13 @@ async fn handle_message(
             let content = tokio::fs::read_to_string(&active.file_path).await?;
             let new_content = format::replace_message(&content, seq, text);
             tokio::fs::write(&active.file_path, &new_content).await?;
+
+            let file_content_for_render = tokio::fs::read_to_string(&active.file_path).await?;
+            let chat_id = config.chat_id;
+            let feedback_msg_id = active.feedback_msg_id;
+            let _ = rich_client
+                .update_window(chat_id, feedback_msg_id.0, config.debounce_secs, &file_content_for_render)
+                .await;
         }
         return Ok(());
     } else {
