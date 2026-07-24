@@ -51,6 +51,24 @@ async fn handle_message(
         None => return Ok(()),
     };
 
+    if text == "." {
+        let mut buf = buffer.lock().await;
+        if let Some(active) = buf.take() {
+            active.close_handle.abort();
+            let chat_id = ChatId(config.chat_id);
+            let thread_id = config.thread_ids.quick_notes.map(|id| ThreadId(MessageId(id)));
+            let filename = active.file_path.file_name()
+                .and_then(|f| f.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let _ = bot
+                .send_message(chat_id, format!("Окно закрыто: {}\nСообщений: {}", filename, active.message_count))
+                .message_thread_id(thread_id.unwrap_or(ThreadId(MessageId(0))))
+                .await;
+        }
+        return Ok(());
+    }
+
     let explicit_title = extract_explicit_title(text);
     let has_marker = explicit_title.is_some();
 
