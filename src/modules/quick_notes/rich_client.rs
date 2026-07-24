@@ -63,19 +63,30 @@ impl RichClient {
         filename: Option<&str>,
         content: &str,
     ) -> Result<(), String> {
-        let rich_message = match (remaining_secs, filename) {
-            (Some(secs), _) => build_rich_message(secs, content),
-            (None, Some(name)) => build_final_message(name, content),
-            (None, None) => InputRichMessage::builder().markdown(content.to_string()).build(),
+        let (rich_message, with_keyboard) = match (remaining_secs, filename) {
+            (Some(secs), _) => (build_rich_message(secs, content), true),
+            (None, Some(name)) => (build_final_message(name, content), false),
+            (None, None) => (InputRichMessage::builder().markdown(content.to_string()).build(), false),
         };
 
-        let params = EditMessageTextParams::builder()
-            .chat_id(ChatId::Integer(chat_id))
-            .message_id(message_id)
-            .rich_message(rich_message)
-            .build();
+        let result = if with_keyboard {
+            let params = EditMessageTextParams::builder()
+                .chat_id(ChatId::Integer(chat_id))
+                .message_id(message_id)
+                .rich_message(rich_message)
+                .reply_markup(build_keyboard())
+                .build();
+            self.api.edit_message_text(&params).await
+        } else {
+            let params = EditMessageTextParams::builder()
+                .chat_id(ChatId::Integer(chat_id))
+                .message_id(message_id)
+                .rich_message(rich_message)
+                .build();
+            self.api.edit_message_text(&params).await
+        };
 
-        match self.api.edit_message_text(&params).await {
+        match result {
             Ok(_) => Ok(()),
             Err(e) => {
                 error!("Failed to edit rich message: {:?}", e);
