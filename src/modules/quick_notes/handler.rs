@@ -104,10 +104,11 @@ async fn handle_message(
             tokio::fs::write(&active.file_path, &new_content).await?;
 
             let file_content_for_render = tokio::fs::read_to_string(&active.file_path).await?;
+            let render_content = strip_frontmatter(&file_content_for_render);
             let chat_id = config.chat_id;
             let feedback_msg_id = active.feedback_msg_id;
             let _ = rich_client
-                .update_window(chat_id, feedback_msg_id.0, config.debounce_secs, &file_content_for_render)
+                .update_window(chat_id, feedback_msg_id.0, Some(config.debounce_secs), None, render_content)
                 .await;
         }
         return Ok(());
@@ -131,8 +132,9 @@ async fn handle_message(
             let rich_client_clone = rich_client.clone();
 
             let file_content_for_render = tokio::fs::read_to_string(&active.file_path).await?;
+            let render_content = strip_frontmatter(&file_content_for_render);
             let _ = rich_client
-                .update_window(chat_id, feedback_msg_id.0, debounce_secs, &file_content_for_render)
+                .update_window(chat_id, feedback_msg_id.0, Some(debounce_secs), None, render_content)
                 .await;
 
             active.close_handle = tokio::spawn(async move {
@@ -169,15 +171,16 @@ async fn handle_message(
         now.to_rfc3339()
     );
 
-    let file_content = format!("{}---1---\n{}\n", frontmatter, content);
+    let file_content = format!("{}---1---\n\n{}\n", frontmatter, content);
     tokio::fs::write(&file_path, &file_content).await?;
 
     let chat_id = config.chat_id;
     let thread_id = config.thread_ids.quick_notes;
     let file_content_for_render = tokio::fs::read_to_string(&file_path).await?;
+    let render_content = strip_frontmatter(&file_content_for_render);
 
     let rich_msg_id = rich_client
-        .open_window(chat_id, thread_id, config.debounce_secs, &file_content_for_render)
+        .open_window(chat_id, thread_id, config.debounce_secs, render_content)
         .await
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
 
@@ -219,11 +222,22 @@ async fn start_countdown(
 
     let Some(file_path) = file_path else { return };
 
+    let filename = file_path.file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
     for remaining in (1..debounce_secs).rev() {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         if let Ok(content) = tokio::fs::read_to_string(&file_path).await {
-            let _ = rich_client.update_window(chat_id, msg_id.0, remaining, &content).await;
+            let render_content = strip_frontmatter(&content);
+            let _ = rich_client.update_window(chat_id, msg_id.0, Some(remaining), None, render_content).await;
         }
+    }
+
+    if let Ok(content) = tokio::fs::read_to_string(&file_path).await {
+        let render_content = strip_frontmatter(&content);
+        let _ = rich_client.update_window(chat_id, msg_id.0, None, Some(&filename), render_content).await;
     }
 
     let mut buf = buffer.lock().await;
@@ -259,4 +273,12 @@ fn truncate_at_word_boundary(s: &str, max_len: usize) -> &str {
         .unwrap_or(s.len());
     let truncated = &s[..end];
     truncated.rfind(' ').map_or(truncated, |i| &truncated[..i])
+}
+
+fn strip_frontmatter(content: &str) -> &str {
+    content
+        .strip_prefix("---\n")
+        .and_then(|s| s.find("\n---\n"))
+        .map(|end| &content[end + 5..])
+        .unwrap_or(content)
 }

@@ -44,9 +44,9 @@ impl Router {
 
         info!("Router started, dispatching messages");
 
-        let update_handler = Update::filter_message()
-            .chain(Update::filter_edited_message())
-            .endpoint(handler);
+        let update_handler = dptree::entry()
+            .branch(Update::filter_message().endpoint(handler.clone()))
+            .branch(Update::filter_edited_message().endpoint(handler));
 
         Dispatcher::builder(bot, update_handler)
             .build()

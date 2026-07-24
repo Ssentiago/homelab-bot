@@ -56,10 +56,15 @@ impl RichClient {
         &self,
         chat_id: i64,
         message_id: i32,
-        remaining_secs: u64,
+        remaining_secs: Option<u64>,
+        filename: Option<&str>,
         content: &str,
     ) -> Result<(), String> {
-        let rich_message = build_rich_message(remaining_secs, content);
+        let rich_message = match (remaining_secs, filename) {
+            (Some(secs), _) => build_rich_message(secs, content),
+            (None, Some(name)) => build_final_message(name, content),
+            (None, None) => InputRichMessage::builder().markdown(content.to_string()).build(),
+        };
 
         let params = EditMessageTextParams::builder()
             .chat_id(ChatId::Integer(chat_id))
@@ -79,6 +84,13 @@ impl RichClient {
 
 fn build_rich_message(remaining_secs: u64, content: &str) -> InputRichMessage {
     let markdown = format!("# ОКНО: {}\n\n---\n\n{}", remaining_secs, content);
+    InputRichMessage::builder()
+        .markdown(markdown)
+        .build()
+}
+
+fn build_final_message(filename: &str, content: &str) -> InputRichMessage {
+    let markdown = format!("# Файл сохранён: {}\n\n---\n\n{}", filename, content);
     InputRichMessage::builder()
         .markdown(markdown)
         .build()

@@ -50,8 +50,8 @@ pub fn replace_message(content: &str, msg_num: u32, new_text: &str) -> String {
 }
 
 pub fn append_message(content: &str, msg_num: u32, text: &str) -> String {
-    let suffix = if content.ends_with('\n') { "" } else { "\n" };
-    format!("{}{}---{}---\n{}\n", content, suffix, msg_num, text)
+    let suffix = if content.ends_with("\n\n") { "" } else if content.ends_with('\n') { "\n" } else { "\n\n" };
+    format!("{}{}---{}---\n\n{}\n", content, suffix, msg_num, text)
 }
 
 #[cfg(test)]
@@ -87,6 +87,6 @@ mod tests {
     fn test_append_message() {
         let content = "---\ncreated: test\n---\n\n---1---\nhello\n";
         let result = append_message(content, 2, "world");
-        assert!(result.contains("---2---\nworld"));
+        assert!(result.contains("---2---\n\nworld"));
     }
 }
