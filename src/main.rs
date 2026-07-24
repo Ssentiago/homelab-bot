@@ -1,8 +1,12 @@
 mod config;
+mod db;
+mod dedup;
 mod modules;
+mod queue;
 mod router;
 mod startup;
 mod supervisor;
+mod worker;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -57,6 +61,10 @@ async fn main() {
     let config = Arc::new(config);
     info!("Notifications thread: {:?}", config.thread_ids.notifications);
     info!("Quick notes thread: {:?}", config.thread_ids.quick_notes);
+
+    let pool = db::init_db().await;
+
+    worker::spawn_notification_worker(pool, bot.clone(), config.clone());
 
     let mut router = router::Router::new();
 

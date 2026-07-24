@@ -11,6 +11,7 @@ tracing = "0.1"
 futures = "0.3"
 regex = "1"
 frankenstein = { git = "https://github.com/ayrat555/frankenstein", tag = "0.51.0", features = ["client-reqwest"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 
 [dependencies.teloxide]
 version = "0.17"
