@@ -11,6 +11,7 @@ mod supervisor;
 mod worker;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::{MessageId, ThreadId};
@@ -95,10 +96,15 @@ async fn main() {
     // Register notifications health check
     let nf_alive = Arc::new(std::sync::Mutex::new(tokio::time::Instant::now()));
     let nf_port = config.notify_server_port;
+    let nf_ready = Arc::new(AtomicBool::new(false));
+    let nf_ready_check = nf_ready.clone();
     heartbeat.register(ModuleHandle {
         name: "notifications".into(),
         last_alive: nf_alive.clone(),
         check: Box::new(move || {
+            if !nf_ready_check.load(Ordering::Relaxed) {
+                return Err("starting".into());
+            }
             let addr = format!("127.0.0.1:{}", nf_port);
             std::net::TcpStream::connect_timeout(
                 &addr.parse().map_err(|e| format!("parse: {}", e))?,
@@ -161,8 +167,9 @@ async fn main() {
         let config = config_clone3.clone();
         let queue = queue::TaskQueue::new(server_pool.clone(), "pending_notifications");
         let alive = nf_alive.clone();
+        let ready = nf_ready.clone();
         async move {
-            modules::http_notifications_server::run(bot, config, queue, alive).await;
+            modules::http_notifications_server::run(bot, config, queue, alive, ready).await;
         }
     }));
 

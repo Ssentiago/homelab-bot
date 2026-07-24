@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use chrono::Local;
 use teloxide::prelude::*;
 use tokio::time::Instant;
 use tracing::error;
@@ -15,7 +16,6 @@ pub struct ModuleHandle {
 
 pub struct Heartbeat {
     pub start: Instant,
-    pub last_sync: Mutex<Option<Instant>>,
     pub modules: Mutex<Vec<ModuleHandle>>,
 }
 
@@ -23,7 +23,6 @@ impl Heartbeat {
     pub fn new() -> Self {
         Self {
             start: Instant::now(),
-            last_sync: Mutex::new(Some(Instant::now())),
             modules: Mutex::new(Vec::new()),
         }
     }
@@ -49,21 +48,13 @@ pub fn spawn(bot: Bot, hb: std::sync::Arc<Heartbeat>) {
 }
 
 async fn update_description(bot: &Bot, hb: &Heartbeat) {
+    let now = Local::now();
+
     let uptime = hb.start.elapsed();
     let hours = uptime.as_secs() / 3600;
     let mins = (uptime.as_secs() % 3600) / 60;
 
-    let sync_str = match *hb.last_sync.lock().unwrap() {
-        Some(t) => {
-            let ago = t.elapsed();
-            if ago.as_secs() < 120 {
-                format!("{}s ago", ago.as_secs())
-            } else {
-                format!("{}m ago", ago.as_secs() / 60)
-            }
-        }
-        None => "never".to_string(),
-    };
+    let sync_str = now.format("%H:%M:%S").to_string();
 
     let modules_str = {
         let modules = hb.modules.lock().unwrap();
@@ -96,7 +87,5 @@ async fn update_description(bot: &Bot, hb: &Heartbeat) {
 
     if let Err(e) = bot.set_my_short_description().short_description(desc).await {
         error!("Failed to update short description: {}", e);
-    } else {
-        hb.last_sync.lock().unwrap().replace(Instant::now());
     }
 }

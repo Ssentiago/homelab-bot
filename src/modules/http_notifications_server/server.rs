@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -32,7 +33,7 @@ struct AppState {
     queue: TaskQueue,
 }
 
-pub async fn start(bot: Bot, config: Arc<Config>, queue: TaskQueue, alive: Arc<Mutex<Instant>>) {
+pub async fn start(bot: Bot, config: Arc<Config>, queue: TaskQueue, alive: Arc<Mutex<Instant>>, ready: Arc<AtomicBool>) {
     info!("HTTP notifications server task started on port {}", config.notify_server_port);
 
     let alive_pinger = alive.clone();
@@ -66,6 +67,8 @@ pub async fn start(bot: Bot, config: Arc<Config>, queue: TaskQueue, alive: Arc<M
         "Send notifications via: curl -X POST http://localhost:{}/notify -H \"Authorization: Bearer <token>\" -F \"message=...\"",
         config.notify_server_port
     );
+
+    ready.store(true, Ordering::Relaxed);
 
     let alive_pinger = alive.clone();
     tokio::spawn(async move {
