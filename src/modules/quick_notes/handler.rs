@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Local;
+use sqlx::SqlitePool;
 use teloxide::prelude::*;
 use teloxide::types::MessageId;
 use tokio::sync::{mpsc, Mutex};
@@ -10,6 +11,7 @@ use tokio::task::JoinHandle;
 use tracing::info;
 
 use crate::config::Config;
+use crate::stats;
 use super::format;
 use super::rich_client::RichClient;
 
@@ -33,6 +35,7 @@ pub fn new_buffer() -> ActiveBuffer {
 pub async fn run(
     bot: Bot,
     config: Arc<Config>,
+    pool: SqlitePool,
     buffer: ActiveBuffer,
     mut rx: mpsc::Receiver<Message>,
     mut callback_rx: mpsc::Receiver<teloxide::types::CallbackQuery>,
@@ -59,8 +62,9 @@ pub async fn run(
         let config = config.clone();
         let buffer = buffer.clone();
         let rich_client = RichClient::new(&config);
+        let pool = pool.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_message(bot, msg, config, buffer, &rich_client).await {
+            if let Err(e) = handle_message(bot, msg, config, pool, buffer, &rich_client).await {
                 tracing::error!("Error handling message: {}", e);
             }
         });
@@ -71,6 +75,7 @@ async fn handle_message(
     _bot: Bot,
     msg: Message,
     config: Arc<Config>,
+    pool: SqlitePool,
     buffer: ActiveBuffer,
     rich_client: &RichClient,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -118,6 +123,7 @@ async fn handle_message(
                 start_countdown(rich_client_clone, chat_id, feedback_msg_id, debounce_secs, buffer_clone).await;
             });
         }
+        stats::record_stat(&pool, "note").await;
         return Ok(());
     } else {
         if let Some(ref mut active) = *buf {
@@ -205,6 +211,8 @@ async fn handle_message(
         message_sequence: 1,
         message_ids,
     });
+
+    stats::record_stat(&pool, "note").await;
 
     Ok(())
 }

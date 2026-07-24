@@ -5,6 +5,7 @@ mod modules;
 mod queue;
 mod router;
 mod startup;
+mod stats;
 mod supervisor;
 mod worker;
 
@@ -16,6 +17,7 @@ use tracing::{info, error};
 use tracing_subscriber::EnvFilter;
 
 use config::Config;
+use stats::BotStart;
 
 #[tokio::main]
 async fn main() {
@@ -64,10 +66,17 @@ async fn main() {
 
     let pool = db::init_db().await;
 
+    stats::cleanup_expired(&pool).await;
+
+    let bot_start = Arc::new(BotStart::now());
+
+    stats::spawn_cleanup(pool.clone());
+
     let notifications_queue = queue::TaskQueue::new(pool.clone(), "pending_notifications");
     notifications_queue.init_table("chat_id INTEGER NOT NULL, thread_id INTEGER, kind TEXT NOT NULL DEFAULT 'plain', text TEXT, rich_markdown TEXT, edit_message_id INTEGER").await.expect("Failed to init notifications table");
 
-    worker::spawn_notification_worker(queue::TaskQueue::new(pool.clone(), "pending_notifications"), bot.clone(), config.clone());
+    let worker_pool = pool.clone();
+    worker::spawn_notification_worker(queue::TaskQueue::new(worker_pool, "pending_notifications"), bot.clone(), config.clone());
 
     let mut router = router::Router::new();
 
@@ -81,19 +90,22 @@ async fn main() {
     let callback_rx = router.register_callback();
 
     let bot_clone = bot.clone();
+    let router_pool = pool.clone();
+    let router_start = bot_start.clone();
     let router_task = tokio::spawn(async move {
-        router.run(bot_clone).await;
+        router.run(bot_clone, router_pool, router_start).await;
     });
 
     let bot_clone2 = bot.clone();
     let config_clone2 = config.clone();
+    let notes_pool = pool.clone();
 
     let _quick_notes_task = if let Some(rx) = quick_notes_rx {
         let bot = bot_clone2.clone();
         let config = config_clone2.clone();
         let buffer = modules::quick_notes::handler::new_buffer();
         Some(tokio::spawn(async move {
-            modules::quick_notes::handler::run(bot, config, buffer, rx, callback_rx).await;
+            modules::quick_notes::handler::run(bot, config, notes_pool, buffer, rx, callback_rx).await;
         }))
     } else {
         None
@@ -101,11 +113,12 @@ async fn main() {
 
     let bot_clone3 = bot.clone();
     let config_clone3 = config.clone();
+    let server_pool = pool.clone();
 
     let http_task = tokio::spawn(supervisor::run_supervised("http_server", move || {
         let bot = bot_clone3.clone();
         let config = config_clone3.clone();
-        let queue = queue::TaskQueue::new(pool.clone(), "pending_notifications");
+        let queue = queue::TaskQueue::new(server_pool.clone(), "pending_notifications");
         async move {
             modules::http_notifications_server::run(bot, config, queue).await;
         }

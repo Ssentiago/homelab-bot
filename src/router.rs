@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use sqlx::SqlitePool;
 use teloxide::prelude::*;
-use teloxide::types::{CallbackQuery, ThreadId};
+use teloxide::types::{CallbackQuery, ChatId, MessageId, ThreadId};
 use tokio::sync::mpsc;
 use tracing::{info, error};
+
+use crate::stats::{self, BotStart};
 
 type MessageSender = mpsc::Sender<Message>;
 type MessageReceiver = mpsc::Receiver<Message>;
@@ -34,13 +37,29 @@ impl Router {
         rx
     }
 
-    pub async fn run(self, bot: Bot) {
+    pub async fn run(self, bot: Bot, pool: SqlitePool, bot_start: Arc<BotStart>) {
         let routes = Arc::new(self.routes);
         let callback_sender = Arc::new(self.callback_sender);
 
-        let message_handler = move |_bot: Bot, msg: Message| {
+        let message_handler = move |bot: Bot, msg: Message| {
             let routes = routes.clone();
+            let pool = pool.clone();
+            let bot_start = bot_start.clone();
             async move {
+                if let Some(text) = msg.text()
+                    && text.starts_with("/status")
+                {
+                    let snapshot = stats::query_today(&pool).await;
+                    let status_text = stats::format_status(&snapshot, &bot_start);
+                    if let Err(e) = bot.send_message(ChatId(msg.chat.id.0), status_text)
+                        .message_thread_id(msg.thread_id.unwrap_or(ThreadId(MessageId(0))))
+                        .await
+                    {
+                        error!("Failed to send status: {}", e);
+                    }
+                    return Ok(());
+                }
+
                 if let Some(thread_id) = msg.thread_id
                     && let Some(sender) = routes.get(&thread_id)
                     && let Err(e) = sender.send(msg).await

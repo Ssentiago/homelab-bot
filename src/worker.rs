@@ -2,15 +2,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::sqlite::SqliteRow;
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 use teloxide::prelude::*;
 use teloxide::types::{ChatId, MessageId, ThreadId};
 use tracing::{info, error};
 
 use crate::config::Config;
 use crate::queue::TaskQueue;
+use crate::stats;
 
 pub fn spawn_notification_worker(queue: TaskQueue, bot: Bot, _config: Arc<Config>) {
+    let pool: SqlitePool = queue.pool().clone();
     tokio::spawn(async move {
         info!("Notification worker started");
         loop {
@@ -21,6 +23,7 @@ pub fn spawn_notification_worker(queue: TaskQueue, bot: Bot, _config: Arc<Config
                         error!("Task {} failed: {}", id, e);
                         let _ = queue.mark_pending_retry(id, &e.to_string()).await;
                     } else {
+                        stats::record_stat(&pool, "notification").await;
                         info!("Task {} completed", id);
                         let _ = queue.mark_done(id).await;
                     }

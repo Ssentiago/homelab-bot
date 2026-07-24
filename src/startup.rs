@@ -1,10 +1,14 @@
 use teloxide::prelude::*;
-use teloxide::types::{ChatId, MessageId, ThreadId};
+use teloxide::types::{BotCommand, ChatId, MessageId, ThreadId};
 use tracing::info;
 
 use crate::config::Config;
 
 pub async fn ensure_topics_exist(bot: &Bot, config: &mut Config) -> anyhow::Result<()> {
+    bot.set_my_commands(vec![
+        BotCommand::new("status", "Показать статус бота"),
+    ]).await?;
+
     if !config.topics_not_created() {
         send_welcome_messages(bot, config).await?;
         return Ok(());
