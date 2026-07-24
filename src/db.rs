@@ -41,6 +41,21 @@ pub async fn init_db() -> SqlitePool {
         .await
         .expect("Failed to create index");
 
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS stats (
+            kind TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )",
+    )
+    .execute(&pool)
+    .await
+    .expect("Failed to create stats table");
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_stats_kind_created ON stats(kind, created_at)")
+        .execute(&pool)
+        .await
+        .expect("Failed to create stats index");
+
     info!("Database initialized");
     pool
 }
