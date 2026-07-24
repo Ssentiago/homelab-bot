@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use chrono::Local;
 use sqlx::SqlitePool;
@@ -8,6 +8,7 @@ use teloxide::prelude::*;
 use teloxide::types::MessageId;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use tracing::info;
 
 use crate::config::Config;
@@ -36,6 +37,7 @@ pub async fn run(
     bot: Bot,
     config: Arc<Config>,
     pool: SqlitePool,
+    alive: Arc<StdMutex<Instant>>,
     buffer: ActiveBuffer,
     mut rx: mpsc::Receiver<Message>,
     mut callback_rx: mpsc::Receiver<teloxide::types::CallbackQuery>,
@@ -57,17 +59,26 @@ pub async fn run(
         }
     });
 
-    while let Some(msg) = rx.recv().await {
-        let bot = bot.clone();
-        let config = config.clone();
-        let buffer = buffer.clone();
-        let rich_client = RichClient::new(&config);
-        let pool = pool.clone();
-        tokio::spawn(async move {
-            if let Err(e) = handle_message(bot, msg, config, pool, buffer, &rich_client).await {
-                tracing::error!("Error handling message: {}", e);
+    loop {
+        tokio::select! {
+            msg = rx.recv() => {
+                let Some(msg) = msg else { break };
+                *alive.lock().unwrap() = Instant::now();
+                let bot = bot.clone();
+                let config = config.clone();
+                let buffer = buffer.clone();
+                let rich_client = RichClient::new(&config);
+                let pool = pool.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = handle_message(bot, msg, config, pool, buffer, &rich_client).await {
+                        tracing::error!("Error handling message: {}", e);
+                    }
+                });
             }
-        });
+            _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {
+                *alive.lock().unwrap() = Instant::now();
+            }
+        }
     }
 }
 

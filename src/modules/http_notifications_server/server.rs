@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::{
@@ -13,7 +13,7 @@ use axum::{
 };
 use serde::Serialize;
 use teloxide::prelude::*;
-use tokio::sync::Mutex;
+use tokio::time::Instant;
 use tracing::info;
 
 use crate::config::Config;
@@ -32,8 +32,16 @@ struct AppState {
     queue: TaskQueue,
 }
 
-pub async fn start(bot: Bot, config: Arc<Config>, queue: TaskQueue) {
+pub async fn start(bot: Bot, config: Arc<Config>, queue: TaskQueue, alive: Arc<Mutex<Instant>>) {
     info!("HTTP notifications server task started on port {}", config.notify_server_port);
+
+    let alive_pinger = alive.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            *alive_pinger.lock().unwrap() = Instant::now();
+        }
+    });
 
     let state = Arc::new(AppState {
         bot,
@@ -58,6 +66,14 @@ pub async fn start(bot: Bot, config: Arc<Config>, queue: TaskQueue) {
         "Send notifications via: curl -X POST http://localhost:{}/notify -H \"Authorization: Bearer <token>\" -F \"message=...\"",
         config.notify_server_port
     );
+
+    let alive_pinger = alive.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            *alive_pinger.lock().unwrap() = Instant::now();
+        }
+    });
 
     axum::serve(listener, app).await.unwrap();
 }

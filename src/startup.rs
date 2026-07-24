@@ -1,5 +1,5 @@
 use teloxide::prelude::*;
-use teloxide::types::{BotCommand, ChatId, MessageId, ThreadId};
+use teloxide::types::{BotCommand, ChatId};
 use tracing::info;
 
 use crate::config::Config;
@@ -10,7 +10,6 @@ pub async fn ensure_topics_exist(bot: &Bot, config: &mut Config) -> anyhow::Resu
     ]).await?;
 
     if !config.topics_not_created() {
-        send_welcome_messages(bot, config).await?;
         return Ok(());
     }
 
@@ -33,26 +32,6 @@ pub async fn ensure_topics_exist(bot: &Bot, config: &mut Config) -> anyhow::Resu
 
     config.save_thread_ids(notifications_id, quick_notes_id);
     info!("Thread IDs saved to config.json");
-
-    send_welcome_messages(bot, config).await?;
-
-    Ok(())
-}
-
-async fn send_welcome_messages(bot: &Bot, config: &Config) -> anyhow::Result<()> {
-    let chat_id = ChatId(config.chat_id);
-
-    if let Some(id) = config.thread_ids.notifications {
-        bot.send_message(chat_id, "Топик готов. Сюда будут приходить уведомления.")
-            .message_thread_id(ThreadId(MessageId(id)))
-            .await?;
-    }
-
-    if let Some(id) = config.thread_ids.quick_notes {
-        bot.send_message(chat_id, "Топик готов. Пишите сюда быстрые заметки — бот сохранит.")
-            .message_thread_id(ThreadId(MessageId(id)))
-            .await?;
-    }
 
     Ok(())
 }
