@@ -61,10 +61,8 @@ features = ["multipart"]
 version = "0.5"
 features = ["trace"]
 
-[dependencies.self_update]
-version = "1.0.0-rc.1"
-default-features = false
-features = ["reqwest"]
+[dependencies.self-replace]
+version = "1.5"
 
 [dependencies.rustls]
 version = "0.23"
@@ -80,4 +78,6 @@ default-features = false
 features = [
     "rustls-no-provider",
     "webpki-roots",
+    "blocking",
+    "json",
 ]

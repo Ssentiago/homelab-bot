@@ -13,6 +13,7 @@ mod worker;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use serde::Deserialize;
 use teloxide::prelude::*;
 use teloxide::types::{MessageId, ThreadId};
 use tracing::{info, error};
@@ -29,11 +30,14 @@ async fn main() {
         .expect("failed to install rustls ring provider");
 
     if std::env::args().any(|arg| arg == "--update") {
-        if let Err(e) = self_update() {
-            eprintln!("Update failed: {}", e);
-            std::process::exit(1);
+        match self_update() {
+            Err(e) => {
+                eprintln!("Update failed: {}", e);
+                std::process::exit(1);
+            }
+            Ok(true) => std::process::exit(0),
+            Ok(false) => return,
         }
-        return;
     }
 
     dotenvy::dotenv().ok();
@@ -176,17 +180,62 @@ async fn main() {
     let _ = tokio::join!(router_task, http_task);
 }
 
-fn self_update() -> Result<(), Box<dyn std::error::Error>> {
-    let status = self_update::backends::github::Update::configure()
-        .repo_owner("Ssentiago")
-        .repo_name("homelab-bot")
-        .bin_name("homelab-bot")
-        .show_download_progress(true)
-        .no_confirm(true)
-        .current_version(self_update::cargo_crate_version!())
-        .asset_identifier("homelab-bot")
-        .build()?
-        .update()?;
-    println!("Updated to version {}", status.version());
-    Ok(())
+#[derive(Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    assets: Vec<GitHubAsset>,
+}
+
+#[derive(Deserialize)]
+struct GitHubAsset {
+    name: String,
+    browser_download_url: String,
+    size: u64,
+}
+
+fn self_update() -> Result<bool, Box<dyn std::error::Error>> {
+    let current = env!("CARGO_PKG_VERSION");
+    println!("Current version: {}", current);
+
+    println!("Checking for updates...");
+    let client = reqwest::blocking::Client::new();
+    let release: GitHubRelease = client
+        .get("https://api.github.com/repos/Ssentiago/homelab-bot/releases/latest")
+        .header("User-Agent", "homelab-bot-updater")
+        .header("Accept", "application/vnd.github+json")
+        .send()?
+        .json()?;
+
+    let latest = &release.tag_name;
+    println!("Latest version: {}", latest);
+
+    if current == latest {
+        println!("Already up to date!");
+        return Ok(false);
+    }
+
+    println!("New version found! {} -> {}", current, latest);
+
+    let asset = release
+        .assets
+        .iter()
+        .find(|a| a.name == "homelab-bot")
+        .ok_or("Asset 'homelab-bot' not found in release")?;
+
+    println!("Downloading {} bytes...", asset.size);
+    let response = reqwest::blocking::get(&asset.browser_download_url)?;
+    let bytes = response.bytes()?;
+    println!("Downloaded successfully");
+
+    println!("Installing update...");
+    let new_path = std::env::current_exe()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .with_file_name("homelab-bot.new");
+    std::fs::write(&new_path, &bytes)?;
+
+    self_replace::self_replace(&new_path)?;
+    let _ = std::fs::remove_file(&new_path);
+
+    println!("Updated to {}!", latest);
+    Ok(true)
 }
