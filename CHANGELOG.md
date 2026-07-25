@@ -1,3 +1,8 @@
+## [0.4.1] - 2026-07-25
+
+### Bug Fixes
+- replace self_update with self-replace to fix empty binary on update ([`0e12b9a`](https://github.com/Ssentiago/homelab-bot/commit/0e12b9a6859e469e2b653450ccd6bc5336dc4a84))
+
 ## [0.4.0] - 2026-07-25
 
 ### Features
