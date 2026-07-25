@@ -63,16 +63,16 @@ async fn update_description(bot: &Bot, hb: &Heartbeat) {
             .map(|h| {
                 let alive_age = h.last_alive.lock().unwrap().elapsed().as_secs();
                 if alive_age > 120 {
-                    format!("  {} 💀", h.name)
+                    format!("{} 💀", h.name)
                 } else {
                     match (h.check)() {
-                        Ok(()) => format!("  {} ✓", h.name),
-                        Err(e) => format!("  {} ⚠ {}", h.name, e),
+                        Ok(()) => format!("{} ✓", h.name),
+                        Err(e) => format!("{} ⚠ {}", h.name, e),
                     }
                 }
             })
             .collect();
-        lines.sort_by(|a, b| a[2..].cmp(&b[2..]));
+        lines.sort();
         if lines.is_empty() {
             String::new()
         } else {
