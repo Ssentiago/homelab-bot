@@ -181,7 +181,7 @@ async fn handle_notify(
     }
 
     let chat_id = state.config.chat_id;
-    let thread_id = state.config.thread_ids.notifications;
+    let thread_id = state.config.thread_ids.output;
     let text = format_notification(&message, &level, source.as_deref());
 
     let _ = queue::insert_notification(

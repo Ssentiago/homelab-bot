@@ -8,8 +8,8 @@ const CONFIG_FILE: &str = "config.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThreadIds {
-    pub notifications: Option<i32>,
-    pub quick_notes: Option<i32>,
+    pub input: Option<i32>,
+    pub output: Option<i32>,
 }
 
 #[derive(Debug, Clone)]
@@ -48,8 +48,8 @@ impl Config {
     fn load_thread_ids() -> ThreadIds {
         if !Path::new(CONFIG_FILE).exists() {
             return ThreadIds {
-                notifications: None,
-                quick_notes: None,
+                input: None,
+                output: None,
             };
         }
 
@@ -58,13 +58,13 @@ impl Config {
     }
 
     pub fn topics_not_created(&self) -> bool {
-        self.thread_ids.notifications.is_none() && self.thread_ids.quick_notes.is_none()
+        self.thread_ids.input.is_none() && self.thread_ids.output.is_none()
     }
 
-    pub fn save_thread_ids(&mut self, notifications: i32, quick_notes: i32) {
+    pub fn save_thread_ids(&mut self, input: i32, output: i32) {
         let thread_ids = ThreadIds {
-            notifications: Some(notifications),
-            quick_notes: Some(quick_notes),
+            input: Some(input),
+            output: Some(output),
         };
 
         let content = serde_json::to_string_pretty(&thread_ids).expect("Failed to serialize thread_ids");

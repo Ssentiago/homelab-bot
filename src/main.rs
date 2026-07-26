@@ -1,13 +1,18 @@
+mod cleanup;
 mod config;
 mod db;
 mod dedup;
+mod fsm;
 mod heartbeat;
+mod history;
+mod module;
 mod modules;
 mod queue;
 mod router;
 mod startup;
 mod stats;
 mod supervisor;
+mod ui;
 mod worker;
 
 use std::path::PathBuf;
@@ -15,13 +20,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use serde::Deserialize;
 use teloxide::prelude::*;
-use teloxide::types::{MessageId, ThreadId};
 use tracing::{info, error};
 use tracing_subscriber::EnvFilter;
 
 use config::Config;
 use heartbeat::{Heartbeat, ModuleHandle};
-use stats::BotStart;
 
 #[tokio::main]
 async fn main() {
@@ -68,14 +71,12 @@ async fn main() {
     }
 
     let config = Arc::new(config);
-    info!("Notifications thread: {:?}", config.thread_ids.notifications);
-    info!("Quick notes thread: {:?}", config.thread_ids.quick_notes);
+    info!("Input thread: {:?}", config.thread_ids.input);
+    info!("Output thread: {:?}", config.thread_ids.output);
 
     let pool = db::init_db().await;
 
     stats::cleanup_expired(&pool).await;
-
-    let bot_start = Arc::new(BotStart::now());
 
     let heartbeat = Arc::new(Heartbeat::new());
 
@@ -129,47 +130,27 @@ async fn main() {
     let worker_pool = pool.clone();
     worker::spawn_notification_worker(queue::TaskQueue::new(worker_pool, "pending_notifications"), bot.clone(), config.clone());
 
-    let mut router = router::Router::new();
+    // --- FSM + UI ---
+    let fsm = Arc::new(tokio::sync::Mutex::new(
+        fsm::Fsm::new(&bot, config.clone(), pool.clone(), qn_alive.clone()).await,
+    ));
 
-    let quick_notes_rx = if let Some(thread_id) = config.thread_ids.quick_notes {
-        let thread_id = ThreadId(MessageId(thread_id));
-        Some(router.register(thread_id))
-    } else {
-        None
-    };
-
-    let callback_rx = router.register_callback();
-
-    let bot_clone = bot.clone();
-    let router_pool = pool.clone();
-    let router_start = bot_start.clone();
-    let router_task = tokio::spawn(async move {
-        router.run(bot_clone, router_pool, router_start).await;
+    // --- Router (новый, с мидлварью) ---
+    let router_task = tokio::spawn({
+        let bot = bot.clone();
+        let fsm = fsm.clone();
+        let input_thread_id = config.thread_ids.input.unwrap_or(0);
+        async move {
+            let mut dispatcher = router::create_dispatcher(bot, fsm, input_thread_id);
+            dispatcher.dispatch().await;
+        }
     });
 
-    let bot_clone2 = bot.clone();
-    let config_clone2 = config.clone();
-    let notes_pool = pool.clone();
-
-    let _quick_notes_task = if let Some(rx) = quick_notes_rx {
-        let bot = bot_clone2.clone();
-        let config = config_clone2.clone();
-        let buffer = modules::quick_notes::handler::new_buffer();
-        Some(tokio::spawn(async move {
-            modules::quick_notes::handler::run(bot, config, notes_pool, qn_alive.clone(), buffer, rx, callback_rx).await;
-        }))
-    } else {
-        None
-    };
-
-    let bot_clone3 = bot.clone();
-    let config_clone3 = config.clone();
-    let server_pool = pool.clone();
-
+    // --- HTTP-сервер (target → output thread_id) ---
     let http_task = tokio::spawn(supervisor::run_supervised("http_server", move || {
-        let bot = bot_clone3.clone();
-        let config = config_clone3.clone();
-        let queue = queue::TaskQueue::new(server_pool.clone(), "pending_notifications");
+        let bot = bot.clone();
+        let config = config.clone();
+        let queue = queue::TaskQueue::new(pool.clone(), "pending_notifications");
         let alive = nf_alive.clone();
         let ready = nf_ready.clone();
         async move {

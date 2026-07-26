@@ -1,95 +1,114 @@
-use std::collections::HashMap;
 use std::sync::Arc;
-
-use sqlx::SqlitePool;
 use teloxide::prelude::*;
-use teloxide::types::{CallbackQuery, ChatId, MessageId, ThreadId};
-use tokio::sync::mpsc;
-use tracing::{info, error};
+use teloxide::types::{CallbackQuery, MessageId, ThreadId};
+use teloxide::utils::command::BotCommands;
+use tokio::sync::Mutex;
 
-use crate::stats::{self, BotStart};
+use crate::fsm::Fsm;
+use crate::module::{InputPayload, RouteKind, Mode};
 
-type MessageSender = mpsc::Sender<Message>;
-type MessageReceiver = mpsc::Receiver<Message>;
-
-pub struct Router {
-    routes: HashMap<ThreadId, MessageSender>,
-    callback_sender: mpsc::Sender<CallbackQuery>,
+#[derive(BotCommands, Clone)]
+#[command(rename_rule = "lowercase")]
+enum Command {
+    Start,
 }
 
-impl Router {
-    pub fn new() -> Self {
-        Self {
-            routes: HashMap::new(),
-            callback_sender: mpsc::channel(32).0,
-        }
+/// Классификация текстовых сообщений (чистая функция)
+fn classify_message(msg: &Message, input_thread_id: i32) -> Option<RouteKind> {
+    if msg.thread_id != Some(ThreadId(MessageId(input_thread_id))) {
+        return None;
     }
+    msg.text().map(|_| RouteKind::ModuleInput {
+        payload: InputPayload::RawMessage(Box::new(msg.clone())),
+    })
+}
 
-    pub fn register(&mut self, thread_id: ThreadId) -> MessageReceiver {
-        let (tx, rx) = mpsc::channel(32);
-        self.routes.insert(thread_id, tx);
-        rx
+/// Классификация callback-запросов (чистая функция)
+fn classify_callback(q: &CallbackQuery) -> Option<RouteKind> {
+    let data = q.data.as_deref()?;
+    if data.starts_with("menu:") {
+        let target = match data {
+            "menu:notes" => Mode::Notes,
+            "menu:music" => Mode::Music,
+            "menu:summary" => Mode::Summary,
+            "menu:status" => Mode::Status,
+            "menu:main" => Mode::MainMenu,
+            _ => return None,
+        };
+        Some(RouteKind::MenuNavigation { target })
+    } else {
+        Some(RouteKind::ModuleInput {
+            payload: InputPayload::RawCallback(Box::new(q.clone())),
+        })
     }
+}
 
-    pub fn register_callback(&mut self) -> mpsc::Receiver<CallbackQuery> {
-        let (tx, rx) = mpsc::channel(32);
-        self.callback_sender = tx;
-        rx
-    }
-
-    pub async fn run(self, bot: Bot, pool: SqlitePool, bot_start: Arc<BotStart>) {
-        let routes = Arc::new(self.routes);
-        let callback_sender = Arc::new(self.callback_sender);
-
-        let message_handler = move |bot: Bot, msg: Message| {
-            let routes = routes.clone();
-            let pool = pool.clone();
-            let bot_start = bot_start.clone();
-            async move {
-                if let Some(text) = msg.text()
-                    && text.starts_with("/status")
-                {
-                    let snapshot = stats::query_today(&pool).await;
-                    let status_text = stats::format_status(&snapshot, &bot_start);
-                    if let Err(e) = bot.send_message(ChatId(msg.chat.id.0), status_text)
-                        .message_thread_id(msg.thread_id.unwrap_or(ThreadId(MessageId(0))))
-                        .await
-                    {
-                        error!("Failed to send status: {}", e);
+pub fn create_dispatcher(
+    bot: Bot,
+    fsm: Arc<Mutex<Fsm>>,
+    input_thread_id: i32,
+) -> Dispatcher<Bot, Box<dyn std::error::Error + Send + Sync>, teloxide::dispatching::DefaultKey> {
+    let fsm_cmd = fsm.clone();
+    let fsm_msg = fsm.clone();
+    let fsm_edit = fsm.clone();
+    let fsm_cb = fsm.clone();
+    let handler = dptree::entry()
+        .branch(
+            Update::filter_message()
+                .filter_command::<Command>()
+                .endpoint(move |bot: Bot, msg: Message, cmd: Command| {
+                    let fsm = fsm_cmd.clone();
+                    async move {
+                        if matches!(cmd, Command::Start) {
+                            let mut guard = fsm.lock().await;
+                            guard.reset_to_main_menu(&bot).await;
+                            // Delete the /start command message
+                            let _ = bot.delete_message(msg.chat.id, msg.id).await;
+                        }
+                        Ok(())
                     }
-                    return Ok(());
-                }
+                }),
+        )
+        .branch(
+            Update::filter_message()
+                .filter_map(move |msg: Message| classify_message(&msg, input_thread_id))
+                .endpoint(move |bot: Bot, msg: Message, route: RouteKind| {
+                    let fsm = fsm_msg.clone();
+                    async move {
+                        let mut guard = fsm.lock().await;
+                        guard.handle_routed(&bot, msg.chat.id.0, route, Some(msg.id.0 as i64)).await;
+                        Ok(())
+                    }
+                }),
+        )
+        .branch(
+            Update::filter_edited_message()
+                .filter_map(move |msg: Message| classify_message(&msg, input_thread_id))
+                .endpoint(move |bot: Bot, msg: Message, route: RouteKind| {
+                    let fsm = fsm_edit.clone();
+                    async move {
+                        // ponyail: edited messages pass msg_id=0 to avoid deletion
+                        let mut guard = fsm.lock().await;
+                        guard.handle_routed(&bot, msg.chat.id.0, route, Some(msg.id.0 as i64)).await;
+                        Ok(())
+                    }
+                }),
+        )
+        .branch(
+            Update::filter_callback_query()
+                .filter_map(|q: CallbackQuery| classify_callback(&q))
+                .endpoint(move |bot: Bot, q: CallbackQuery, route: RouteKind| {
+                    let fsm = fsm_cb.clone();
+                    async move {
+                        let chat_id = q.message.as_ref().map(|m| m.chat().id.0).unwrap_or(0);
+                        let mut guard = fsm.lock().await;
+                        guard.handle_routed(&bot, chat_id, route, None).await;
+                        Ok(())
+                    }
+                }),
+        );
 
-                if let Some(thread_id) = msg.thread_id
-                    && let Some(sender) = routes.get(&thread_id)
-                    && let Err(e) = sender.send(msg).await
-                {
-                    error!("Failed to route message to thread {:?}: {}", thread_id, e);
-                }
-                Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
-            }
-        };
-
-        let callback_handler = move |_bot: Bot, query: CallbackQuery| {
-            let sender = callback_sender.clone();
-            async move {
-                if let Err(e) = sender.send(query).await {
-                    error!("Failed to route callback query: {}", e);
-                }
-                Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
-            }
-        };
-
-        info!("Router started, dispatching messages");
-
-        let update_handler = dptree::entry()
-            .branch(Update::filter_message().endpoint(message_handler.clone()))
-            .branch(Update::filter_edited_message().endpoint(message_handler))
-            .branch(Update::filter_callback_query().endpoint(callback_handler));
-
-        Dispatcher::builder(bot, update_handler)
-            .build()
-            .dispatch()
-            .await;
-    }
+    Dispatcher::builder(bot, handler)
+        .default_handler(|_| async {})
+        .build()
 }

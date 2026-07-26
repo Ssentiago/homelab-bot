@@ -56,6 +56,49 @@ pub async fn init_db() -> SqlitePool {
         .await
         .expect("Failed to create stats index");
 
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS persistent_ui (
+            key        TEXT PRIMARY KEY DEFAULT 'main',
+            message_id INTEGER NOT NULL,
+            chat_id    INTEGER NOT NULL,
+            thread_id  INTEGER NOT NULL
+        )",
+    )
+    .execute(&pool)
+    .await
+    .expect("Failed to create persistent_ui table");
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS action_history (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            module     TEXT NOT NULL,
+            action     TEXT NOT NULL,
+            content    TEXT,
+            metadata   TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(&pool)
+    .await
+    .expect("Failed to create action_history table");
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_action_history_module ON action_history(module, created_at)",
+    )
+    .execute(&pool)
+    .await
+    .expect("Failed to create action_history index");
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS pending_cleanup (
+            chat_id   INTEGER NOT NULL,
+            message_id INTEGER NOT NULL
+        )",
+    )
+    .execute(&pool)
+    .await
+    .expect("Failed to create pending_cleanup table");
+
     info!("Database initialized");
     pool
 }

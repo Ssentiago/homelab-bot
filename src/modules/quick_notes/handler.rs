@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -20,8 +22,8 @@ const TITLE_MAX_LEN: usize = 50;
 
 pub struct InboxBuffer {
     file_path: PathBuf,
-    close_handle: JoinHandle<()>,
-    feedback_msg_id: MessageId,
+    pub(crate) close_handle: JoinHandle<()>,
+    pub(crate) feedback_msg_id: MessageId,
     message_count: u32,
     message_sequence: u32,
     message_ids: HashMap<MessageId, u32>,
@@ -47,14 +49,16 @@ pub async fn run(
     let buffer_clone = buffer.clone();
     let config_clone = config.clone();
     let bot_clone = bot.clone();
+    let pool_cb = pool.clone();
 
     tokio::spawn(async move {
         while let Some(query) = callback_rx.recv().await {
             let bot = bot_clone.clone();
             let config = config_clone.clone();
             let buffer = buffer_clone.clone();
+            let pool = pool_cb.clone();
             tokio::spawn(async move {
-                handle_callback(bot, query, config, buffer).await;
+                handle_callback(bot, query, config, pool, buffer).await;
             });
         }
     });
@@ -129,9 +133,10 @@ async fn handle_message(
             let chat_id = config.chat_id;
             let feedback_msg_id = active.feedback_msg_id;
             let rich_client_clone = rich_client.clone();
+            let pool_sd = pool.clone();
 
             active.close_handle = tokio::spawn(async move {
-                start_countdown(rich_client_clone, chat_id, feedback_msg_id, debounce_secs, buffer_clone).await;
+                start_countdown(pool_sd, rich_client_clone, chat_id, feedback_msg_id, debounce_secs, buffer_clone).await;
             });
         }
         stats::record_stat(&pool, "note").await;
@@ -154,9 +159,10 @@ async fn handle_message(
             let debounce_secs = config.debounce_secs;
             let chat_id = config.chat_id;
             let rich_client_clone = rich_client.clone();
+            let pool_sd = pool.clone();
 
             active.close_handle = tokio::spawn(async move {
-                start_countdown(rich_client_clone, chat_id, feedback_msg_id, debounce_secs, buffer_clone).await;
+                start_countdown(pool_sd, rich_client_clone, chat_id, feedback_msg_id, debounce_secs, buffer_clone).await;
             });
 
             return Ok(());
@@ -193,7 +199,7 @@ async fn handle_message(
     tokio::fs::write(&file_path, &file_content).await?;
 
     let chat_id = config.chat_id;
-    let thread_id = config.thread_ids.quick_notes;
+    let thread_id = config.thread_ids.input;
     let file_content_for_render = tokio::fs::read_to_string(&file_path).await?;
     let render_content = render_for_display(&file_content_for_render);
 
@@ -206,9 +212,10 @@ async fn handle_message(
     let buffer_clone = buffer.clone();
     let debounce_secs = config.debounce_secs;
     let rich_client_clone = rich_client.clone();
+    let pool_sd = pool.clone();
 
     let close_handle = tokio::spawn(async move {
-        start_countdown(rich_client_clone, chat_id, feedback_msg_id, debounce_secs, buffer_clone).await;
+        start_countdown(pool_sd, rich_client_clone, chat_id, feedback_msg_id, debounce_secs, buffer_clone).await;
     });
 
     let mut message_ids = HashMap::new();
@@ -229,6 +236,7 @@ async fn handle_message(
 }
 
 async fn start_countdown(
+    pool: SqlitePool,
     rich_client: RichClient,
     chat_id: i64,
     msg_id: MessageId,
@@ -262,6 +270,11 @@ async fn start_countdown(
 
     let mut buf = buffer.lock().await;
     *buf = None;
+    let _ = sqlx::query("INSERT INTO pending_cleanup (chat_id, message_id) VALUES (?, ?)")
+        .bind(chat_id)
+        .bind(msg_id.0)
+        .execute(&pool)
+        .await;
 }
 
 fn slugify(s: &str) -> String {
@@ -313,6 +326,7 @@ async fn handle_callback(
     _bot: Bot,
     query: teloxide::types::CallbackQuery,
     config: Arc<Config>,
+    pool: SqlitePool,
     buffer: ActiveBuffer,
 ) {
     let data = match query.data.as_deref() {
@@ -344,5 +358,10 @@ async fn handle_callback(
         let final_content = format!("Файл сохранён: {}\n\n{}", filename, render_content);
 
         let _ = rich_client.update_window(chat_id, msg_id, None, Some(&filename), &final_content).await;
+        let _ = sqlx::query("INSERT INTO pending_cleanup (chat_id, message_id) VALUES (?, ?)")
+            .bind(chat_id)
+            .bind(active.feedback_msg_id.0)
+            .execute(&pool)
+            .await;
     }
 }

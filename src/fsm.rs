@@ -1,0 +1,221 @@
+#![allow(dead_code)]
+
+use std::sync::Arc;
+use sqlx::SqlitePool;
+use teloxide::prelude::*;
+use teloxide::types::{ChatId, MessageId, ThreadId};
+
+use crate::config::Config;
+use crate::module::{Action, InputPayload, Mode, ModuleError, RouteKind, ThreadTarget};
+use crate::modules::quick_notes::notes_module::{self, NotesModule};
+use crate::ui::{self, UiPanel};
+
+pub struct Fsm {
+    pub mode: Mode,
+    pub config: Arc<Config>,
+    pub pool: SqlitePool,
+    pub ui: UiPanel,
+    pub notes: NotesModule,
+}
+
+impl Fsm {
+    pub async fn new(
+        bot: &Bot,
+        config: Arc<Config>,
+        pool: SqlitePool,
+        alive: Arc<std::sync::Mutex<tokio::time::Instant>>,
+    ) -> Self {
+        let ui = UiPanel::new(bot, &config, &pool).await;
+        let notes = NotesModule::new(bot, config.clone(), pool.clone(), alive);
+        Self {
+            mode: Mode::MainMenu,
+            config,
+            pool,
+            ui,
+            notes,
+        }
+    }
+
+    /// /start handler — force-reset FSM, delete old UI, send fresh panel
+    pub async fn reset_to_main_menu(&mut self, bot: &Bot) {
+        self.switch_mode_from(bot, Mode::MainMenu).await;
+        self.ui.force_resend(&ui::main_menu_text(), ui::main_menu_keyboard()).await;
+    }
+
+    /// Единая точка входа — вызывается из Router после классификации мидлварью
+    pub async fn handle_routed(
+        &mut self,
+        bot: &Bot,
+        chat_id: i64,
+        route: RouteKind,
+        msg_id: Option<i64>,
+    ) {
+        let result = match route {
+            RouteKind::MenuNavigation { target } => {
+                self.handle_menu_navigation(bot, target).await
+            }
+            RouteKind::ModuleInput { payload } => {
+                self.handle_module_input(payload).await
+            }
+        };
+
+        self.execute_actions(bot, chat_id, msg_id, result).await;
+    }
+
+    async fn handle_menu_navigation(
+        &mut self,
+        bot: &Bot,
+        target: Mode,
+    ) -> Result<Action, ModuleError> {
+        match target {
+            Mode::MainMenu => {
+                self.switch_mode_from(bot, Mode::MainMenu).await;
+                Ok(Action::EditUI {
+                    text: ui::main_menu_text(),
+                    keyboard: ui::main_menu_keyboard(),
+                })
+            }
+            Mode::Notes => {
+                self.switch_mode_from(bot, Mode::Notes).await;
+                Ok(Action::EditUI {
+                    text: "📝 Заметки — активно\n\nОтправьте сообщение для сохранения".to_string(),
+                    keyboard: notes_module::notes_keyboard(),
+                })
+            }
+            Mode::Status => {
+                self.switch_mode_from(bot, Mode::Status).await;
+                Ok(Action::EditUI {
+                    text: self.status_text().await,
+                    keyboard: ui::back_keyboard(),
+                })
+            }
+            Mode::Music | Mode::Summary => {
+                Ok(Action::EditUI {
+                    text: "Coming soon".to_string(),
+                    keyboard: ui::main_menu_keyboard(),
+                })
+            }
+        }
+    }
+
+    async fn handle_module_input(
+        &mut self,
+        payload: InputPayload,
+    ) -> Result<Action, ModuleError> {
+        match payload {
+            InputPayload::RawMessage(msg) => {
+                match self.mode {
+                    Mode::Notes => self.notes.handle_message(*msg).await,
+                    _ => Ok(Action::Noop),
+                }
+            },
+            InputPayload::RawCallback(q) => match self.mode {
+                Mode::Notes => self.notes.handle_callback(*q).await,
+                _ => Ok(Action::Noop),
+            },
+            // ponytail: old Text/Edit/Callback variants — kept for non-Notes modes
+            InputPayload::Text(_) | InputPayload::Edit(_) | InputPayload::Callback(_) => {
+                self.handle_legacy_input(payload).await
+            }
+        }
+    }
+
+    /// Legacy handler for Text/Edit/Callback payloads (non-Notes modes)
+    async fn handle_legacy_input(
+        &mut self,
+        payload: InputPayload,
+    ) -> Result<Action, ModuleError> {
+        match payload {
+            InputPayload::Text(_) => match self.mode {
+                Mode::MainMenu | Mode::Status => Ok(Action::Noop),
+                _ => Ok(Action::EditUI {
+                    text: "Coming soon".to_string(),
+                    keyboard: ui::main_menu_keyboard(),
+                }),
+            },
+            InputPayload::Edit(_) => Ok(Action::Noop),
+            InputPayload::Callback(_) => Ok(Action::Noop),
+            _ => Ok(Action::Noop),
+        }
+    }
+
+    async fn status_text(&self) -> String {
+        let notes_health = "🟢 активно";
+        let version = env!("CARGO_PKG_VERSION");
+        format!(
+            "Homelab Bot v{}\n\n\
+             📝 Заметки — {}\n\
+             🎵 Музыка — ожидает\n\
+             📊 Саммари — ожидает\n\
+             📢 Уведомления — 🟢 активно",
+            version, notes_health
+        )
+    }
+
+    async fn switch_mode_from(&mut self, bot: &Bot, new_mode: Mode) {
+        match self.mode {
+            Mode::Notes => self.notes.exit(bot).await,
+            Mode::MainMenu | Mode::Music | Mode::Summary | Mode::Status => {}
+        }
+        self.mode = new_mode;
+    }
+
+    async fn execute_actions(
+        &mut self,
+        bot: &Bot,
+        chat_id: i64,
+        msg_id: Option<i64>,
+        result: Result<Action, ModuleError>,
+    ) {
+        let action = match result {
+            Ok(a) => {
+                if let Some(id) = msg_id
+                    && matches!(self.mode, Mode::MainMenu)
+                {
+                    let Ok(mid) = i32::try_from(id) else { return; };
+                    let _ = bot.delete_message(ChatId(chat_id), MessageId(mid)).await;
+                }
+                a
+            }
+            Err(ModuleError::Processing(e)) => {
+                Action::EditUI {
+                    text: format!("⚠ Ошибка: {}", e),
+                    keyboard: ui::back_keyboard(),
+                }
+            }
+            Err(ModuleError::Fatal(e)) => {
+                self.mode = Mode::MainMenu;
+                Action::EditUI {
+                    text: format!("⚠ Ошибка модуля: {}\n\nВыберите действие:", e),
+                    keyboard: ui::main_menu_keyboard(),
+                }
+            }
+        };
+
+        match action {
+            Action::EditUI { text, keyboard } => {
+                self.ui.edit(&text, keyboard).await;
+            }
+            Action::SendMessage { text, thread } => {
+                let thread_id = match thread {
+                    ThreadTarget::Input => self.config.thread_ids.input,
+                    ThreadTarget::Output => self.config.thread_ids.output,
+                };
+                let _ = bot
+                    .send_message(ChatId(chat_id), text)
+                    .message_thread_id(ThreadId(MessageId(thread_id.unwrap_or(0))))
+                    .await;
+            }
+            Action::DeleteMessages(ids) => {
+                for id in ids {
+                    let Ok(mid) = i32::try_from(id) else { continue; };
+                    let _ = bot.delete_message(ChatId(chat_id), MessageId(mid)).await;
+                }
+            }
+            Action::SwitchMode(new_mode) => {
+                self.switch_mode_from(bot, new_mode).await;
+            }
+            Action::Noop => {}
+        }
+    }
+}
