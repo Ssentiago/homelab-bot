@@ -1,118 +1,129 @@
 # Homelab Bot
 
-Telegram bot for notes and notifications in a private chat via Forum Topics.
+Telegram-бот для заметок и уведомлений в приватном чате. Работает через Forum Topics — два постоянных топика: «Панель» (управление, inline-клавиатура) и «Мониторинг» (системные алерты).
 
-## Features
+## Возможности
 
-- **Quick Notes** — write messages in the "Quick Notes" topic, bot saves them as markdown files
-- **Notifications** — external services send HTTP requests, bot forwards them to the "Notifications" topic
+- **Быстрые заметки** — пишете текст, бот сохраняет в `.md` файлы с группировкой по времени или явным заголовком (`!`)
+- **Уведомления** — внешние сервисы шлют HTTP-запросы, бот форвардит в топик «Мониторинг»
+- **Управление через кнопки** — persistent UI-панель с inline-клавиатурой, `/start` для перезапуска
 
 ## Setup
 
 ### 1. Telegram Bot
 
-1. Create a bot via [@BotFather](https://t.me/BotFather)
-2. Enable **Threaded Mode** in bot settings
-3. Open chat with the bot and press "Start"
+1. Создать бота через [@BotFather](https://t.me/BotFather)
+2. Включить **Forum Mode** (Groups → ваш чат → Manage → Forum)
+3. Открыть чат с ботом, нажать Start
 
-### 2. Environment Variables
+### 2. Переменные окружения
 
-Copy `.env.example` to `.env` and fill in:
+Скопируйте `.env.example` в `.env` и заполните:
 
 ```bash
 cp .env.example .env
 ```
 
-| Variable | Description | How to get |
-|----------|-------------|------------|
-| `BOT_TOKEN` | Bot token | @BotFather → /mybots → API Token |
-| `CHAT_ID` | Private chat ID | [@userinfobot](https://t.me/userinfobot) |
-| `NOTES_ROOT` | Folder for notes | Absolute path, e.g. `/home/user/notes` |
-| `NOTIFY_SERVER_PORT` | HTTP server port | Default `8787` |
-| `NOTIFY_TOKEN` | Token for HTTP requests | Any random string |
-| `DEBOUNCE_SECS` | Notes grouping window | Default `45` seconds |
+| Переменная | Описание | Как получить |
+|---|---|---|
+| `BOT_TOKEN` | Токен бота | @BotFather → /mybots → API Token |
+| `CHAT_ID` | ID приватного чата | [@userinfobot](https://t.me/userinfobot) |
+| `NOTES_ROOT` | Папка для заметок | Абсолютный путь, например `/home/user/notes` |
+| `NOTIFY_SERVER_PORT` | Порт HTTP-сервера | По умолчанию `8787` |
+| `NOTIFY_TOKEN` | Токен для HTTP-запросов | Любая случайная строка |
+| `DEBOUNCE_SECS` | Окно группировки заметок | По умолчанию `45` секунд |
 
-### 3. Run
+### 3. Запуск
 
-Download binary from [releases](https://github.com/Ssentiago/homelab-bot/releases), place on server. Create `.env` file next to binary (see "Environment Variables" section), then run:
+Скачайте бинарник из [releases](https://github.com/Ssentiago/homelab-bot/releases), положите `.env` рядом:
 
 ```bash
 ./homelab-bot
 ```
 
-On first run bot automatically creates topics and saves their IDs in `config.json`.
+При первом запуске бот создаст топики «Панель» и «Мониторинг» и сохранит их ID в `config.json`.
 
-## Usage
+## Использование
 
-### Quick Notes
+### Главное меню
 
-Write messages in the **"Quick Notes"** topic. Bot groups them by time into markdown files.
+После старта в топике «Панель» появляется persistent UI-панель с кнопками:
 
-**Regular messages:**
 ```
-Buy milk
-Tomorrow it will rain
-Call mom
+Homelab Bot v0.4.1
+
+Выберите действие:
+[📝 Заметки] [🎵 Музыка]
+[📊 Саммари] [📊 Статус]
 ```
-→ One file: `2026-07-04_21-03.md` with all three messages.
 
-**With explicit title (prefix with `!`):**
+Навигация — только через кнопки. Команда `/start` перезапускает панель (полезно, если случайно удалили).
+
+### Быстрые заметки
+
+Нажмите «📝 Заметки», затем отправляйте текст в топик «Панель». Бот группирует сообщения по времени в один файл.
+
+**Обычные сообщения:**
 ```
-! Website landing page
-Need landing for the project
-Deadline — Friday
+Купить молоко
+Завтра дождь
+Позвонить маме
 ```
-→ File: `2026-07-04_21-15_Website-landing-page.md` (first line with `!` is not included in content).
+→ Один файл: `2026-07-04_21-03.md`
 
-**Important:**
-- If filename already exists, suffix is added: `-2`, `-3`, etc.
-- Message with `!` forces a new file, even if previous window is still active
+**С явным заголовком (префикс `!`):**
+```
+! Сайт-визитка
+Нужен лендинг для проекта
+Дедлайн — пятница
+```
+→ Файл: `2026-07-04_21-15_Сайт-визитка.md` (первая строка с `!` не попадает в контент)
 
-### Notifications
+**Важно:**
+- Если имя файла уже существует — добавляется суффикс `-2`, `-3`
+- Сообщение с `!` принудительно начинает новый файл, даже если окно ещё активно
+- Сообщения можно редактировать — бот обновляет содержимое файла и rich-окно
+- При выходе из режима заметок все сообщения и окна очищаются
 
-Send HTTP requests to `http://localhost:{NOTIFY_SERVER_PORT}/notify`.
+### Уведомления
 
-**Example with file:**
+HTTP POST на `http://localhost:{NOTIFY_SERVER_PORT}/notify`.
+
 ```bash
-curl -X POST http://localhost:$NOTIFY_SERVER_PORT/notify \
+curl -X POST http://localhost:8787/notify \
   -H "Authorization: Bearer $NOTIFY_TOKEN" \
-  -F "message=Backup completed" \
+  -F "message=Бэкап завершён" \
   -F "level=info" \
-  -F "source=backup-script" \
-  -F "file=@/path/to/log.txt"
+  -F "source=backup-script"
 ```
 
-**Example without file:**
+| Поле | Обязательно | Описание |
+|---|---|---|
+| `message` | Да | Текст уведомления |
+| `level` | Нет | `info` / `warning` / `error` (по умолчанию `info`) |
+| `source` | Нет | Источник (добавляется в сообщение) |
+
+Ответы сервера: `200 OK` (принято), `400 Bad Request` (невалидный запрос), `401 Unauthorized` (неверный токен).
+
+## Топики
+
+| Топик | Назначение | Кто пишет |
+|---|---|---|
+| 🎛️ Панель | Управление ботом, заметки | Вы + бот |
+| 📡 Мониторинг | Системные алерты | Только бот |
+
+## Логи
+
+Логи пишутся в `/var/log/homelab-bot/bot.log` с ежедневной ротацией.
+
+## Остановка
+
+`Ctrl+C` в терминале, либо `systemctl stop homelab-bot` (если запущен как сервис).
+
+## Обновление
+
 ```bash
-curl -X POST http://localhost:$NOTIFY_SERVER_PORT/notify \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $NOTIFY_TOKEN" \
-  -d '{"message":"Disk space low","level":"warning","source":"monitoring"}'
+./homelab-bot --update
 ```
 
-**Request fields:**
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `message` | Yes | Notification text |
-| `level` | No | `info` / `warning` / `error` (default `info`) |
-| `source` | No | Notification source |
-| `file` | No | File attachment |
-
-**Server responses:**
-- `200 OK` — request accepted
-- `400 Bad Request` — invalid JSON or missing `message`
-- `401 Unauthorized` — invalid token
-
-## Topics
-
-On first run bot automatically creates both topics and saves their IDs in `config.json`.
-
-| Topic | Purpose | Who writes |
-|-------|---------|------------|
-| Quick Notes | Notes | Only you |
-| Notifications | Service alerts | Only bot |
-
-## Stop
-
-Press `Ctrl+C` in terminal. Bot shuts down gracefully.
+Проверяет GitHub Releases, скачивает и атомарно заменяет бинарник. После выхода — systemd перезапускает процесс с новой версией.
