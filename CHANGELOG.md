@@ -1,3 +1,14 @@
+## [0.5.0] - 2026-07-27
+
+### Features
+- add file-based logging with tracing-appender ([`e71ccd7`](https://github.com/Ssentiago/homelab-bot/commit/e71ccd7ef1d9626f5312d2dae77aa319620530ac))
+
+### Bug Fixes
+- remove extra leading spaces in bot short description ([`8f63066`](https://github.com/Ssentiago/homelab-bot/commit/8f63066be62acfec279bb229fd608b8673b297f2))
+
+### Refactoring
+- architecture reform — global FSM, 2 topics, middleware router ([`931c791`](https://github.com/Ssentiago/homelab-bot/commit/931c7917e0b37153b9af71d2284f6df9f9741de2))
+
 ## [0.4.1] - 2026-07-25
 
 ### Bug Fixes
