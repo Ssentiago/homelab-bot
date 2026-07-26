@@ -4,6 +4,7 @@ use std::sync::Arc;
 use sqlx::SqlitePool;
 use teloxide::prelude::*;
 use teloxide::types::{ChatId, MessageId, ThreadId};
+use tracing::{info, warn, instrument};
 
 use crate::config::Config;
 use crate::module::{Action, InputPayload, Mode, ModuleError, RouteKind, ThreadTarget};
@@ -37,12 +38,15 @@ impl Fsm {
     }
 
     /// /start handler — force-reset FSM, delete old UI, send fresh panel
+    #[instrument(skip(self, bot), fields(mode = ?self.mode))]
     pub async fn reset_to_main_menu(&mut self, bot: &Bot) {
+        info!("reset to main menu from {:?}", self.mode);
         self.switch_mode_from(bot, Mode::MainMenu).await;
         self.ui.force_resend(&ui::main_menu_text(), ui::main_menu_keyboard()).await;
     }
 
     /// Единая точка входа — вызывается из Router после классификации мидлварью
+    #[instrument(skip(self, bot), fields(mode = ?self.mode, chat_id = %chat_id))]
     pub async fn handle_routed(
         &mut self,
         bot: &Bot,
@@ -62,6 +66,7 @@ impl Fsm {
         self.execute_actions(bot, chat_id, msg_id, result).await;
     }
 
+    #[instrument(skip(self, bot), fields(target = ?target))]
     async fn handle_menu_navigation(
         &mut self,
         bot: &Bot,
@@ -152,14 +157,19 @@ impl Fsm {
         )
     }
 
+    #[instrument(skip(self, bot), fields(from = ?self.mode, to = ?new_mode))]
     async fn switch_mode_from(&mut self, bot: &Bot, new_mode: Mode) {
         match self.mode {
-            Mode::Notes => self.notes.exit(bot).await,
+            Mode::Notes => {
+                info!("exiting Notes mode");
+                self.notes.exit(bot).await;
+            }
             Mode::MainMenu | Mode::Music | Mode::Summary | Mode::Status => {}
         }
         self.mode = new_mode;
     }
 
+    #[instrument(skip(self, bot), fields(mode = ?self.mode))]
     async fn execute_actions(
         &mut self,
         bot: &Bot,
@@ -172,18 +182,21 @@ impl Fsm {
                 if let Some(id) = msg_id
                     && matches!(self.mode, Mode::MainMenu)
                 {
+                    info!("delete user message {} in MainMenu", id);
                     let Ok(mid) = i32::try_from(id) else { return; };
                     let _ = bot.delete_message(ChatId(chat_id), MessageId(mid)).await;
                 }
                 a
             }
             Err(ModuleError::Processing(e)) => {
+                warn!("module processing error: {}", e);
                 Action::EditUI {
                     text: format!("⚠ Ошибка: {}", e),
                     keyboard: ui::back_keyboard(),
                 }
             }
             Err(ModuleError::Fatal(e)) => {
+                info!("module fatal error, resetting to MainMenu: {}", e);
                 self.mode = Mode::MainMenu;
                 Action::EditUI {
                     text: format!("⚠ Ошибка модуля: {}\n\nВыберите действие:", e),

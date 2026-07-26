@@ -3,6 +3,7 @@
 use teloxide::types::InlineKeyboardMarkup;
 
 /// Результат обработки — что FSM должен сделать после возврата из модуля
+#[derive(Debug)]
 pub enum Action {
     EditUI { text: String, keyboard: InlineKeyboardMarkup },
     SendMessage { text: String, thread: ThreadTarget },
@@ -11,6 +12,7 @@ pub enum Action {
     Noop,
 }
 
+#[derive(Debug)]
 pub enum ThreadTarget {
     Input,
     Output,
@@ -41,6 +43,7 @@ pub enum Mode {
     Status,
 }
 
+#[derive(Debug)]
 pub enum ModuleError {
     Processing(String),
     Fatal(String),

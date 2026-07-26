@@ -3,6 +3,7 @@
 use sqlx::{Row, SqlitePool};
 use teloxide::prelude::*;
 use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ThreadId};
+use tracing::{info, warn, instrument};
 
 use crate::config::Config;
 
@@ -28,8 +29,10 @@ impl UiPanel {
     }
 
     /// Always send a new UI message — deletes the old one first.
+    #[instrument(skip(self, keyboard))]
     pub async fn force_resend(&mut self, text: &str, keyboard: InlineKeyboardMarkup) {
         if self.message_id != 0 {
+            info!("deleting old UI panel, message_id={}", self.message_id);
             let _ = self.bot
                 .delete_message(ChatId(self.chat_id), MessageId(self.message_id))
                 .await;
@@ -40,6 +43,7 @@ impl UiPanel {
     /// Edit existing UI message. If MESSAGE_ID_INVALID — send new, update SQLite.
     /// If the edit is a no-op (same text+keyboard), Telegram returns MESSAGE_NOT_MODIFIED —
     /// silently skip, don't create a duplicate.
+    #[instrument(skip(self, keyboard))]
     pub async fn edit(&mut self, text: &str, keyboard: InlineKeyboardMarkup) {
         let result = self.bot
             .edit_message_text(ChatId(self.chat_id), MessageId(self.message_id), text)
@@ -51,11 +55,13 @@ impl UiPanel {
             if err_str.contains("not modified") {
                 return;
             }
+            warn!("editMessageText failed, sending new UI: {}", err_str);
             self.send(text, keyboard).await;
         }
     }
 
     /// Send a brand new UI message and store its id in SQLite.
+    #[instrument(skip(self, keyboard))]
     pub async fn send(&mut self, text: &str, keyboard: InlineKeyboardMarkup) {
         let msg = self.bot
             .send_message(ChatId(self.chat_id), text)
@@ -64,6 +70,7 @@ impl UiPanel {
             .await;
 
         if let Ok(msg) = msg {
+            info!("sent new UI panel, message_id={}", msg.id.0);
             self.message_id = msg.id.0;
             let _ = sqlx::query(
                 "INSERT OR REPLACE INTO persistent_ui (key, message_id, chat_id, thread_id) \

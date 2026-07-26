@@ -21,7 +21,8 @@ use std::sync::Arc;
 use serde::Deserialize;
 use teloxide::prelude::*;
 use tracing::{info, error};
-use tracing_subscriber::EnvFilter;
+use tracing_appender::rolling;
+use tracing_subscriber::{fmt, EnvFilter};
 
 use config::Config;
 use heartbeat::{Heartbeat, ModuleHandle};
@@ -45,9 +46,16 @@ async fn main() {
 
     dotenvy::dotenv().ok();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
-        .init();
+    let _guard = {
+        let file_appender = rolling::daily("/var/log/homelab-bot", "bot.log");
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+        fmt()
+            .with_writer(non_blocking)
+            .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
+            .with_ansi(false)
+            .init();
+        guard
+    };
 
     let mut config = Config::from_env();
 
@@ -134,6 +142,7 @@ async fn main() {
     let fsm = Arc::new(tokio::sync::Mutex::new(
         fsm::Fsm::new(&bot, config.clone(), pool.clone(), qn_alive.clone()).await,
     ));
+    info!("FSM initialized");
 
     // --- Router (новый, с мидлварью) ---
     let router_task = tokio::spawn({
@@ -141,6 +150,7 @@ async fn main() {
         let fsm = fsm.clone();
         let input_thread_id = config.thread_ids.input.unwrap_or(0);
         async move {
+            info!("Router dispatcher started");
             let mut dispatcher = router::create_dispatcher(bot, fsm, input_thread_id);
             dispatcher.dispatch().await;
         }

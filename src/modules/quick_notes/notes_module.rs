@@ -7,6 +7,7 @@ use tokio::time::Instant;
 use teloxide::prelude::*;
 use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
 use sqlx::{Row, SqlitePool};
+use tracing::instrument;
 
 use crate::config::Config;
 use crate::module::{Action, ModuleError};
@@ -49,6 +50,7 @@ impl NotesModule {
     }
 
     /// Forward incoming message to handler::run via mpsc
+    #[instrument(skip(self), fields(msg_id = msg.id.0))]
     pub async fn handle_message(&mut self, msg: Message) -> Result<Action, ModuleError> {
         let msg_id = msg.id.0;
         self.tx.send(msg).await.ok();
@@ -57,6 +59,7 @@ impl NotesModule {
     }
 
     /// Forward callback or handle locally
+    #[instrument(skip(self, q), fields(data = ?q.data))]
     pub async fn handle_callback(&mut self, q: CallbackQuery) -> Result<Action, ModuleError> {
         match q.data.as_deref() {
             Some("notes:history") => {
@@ -73,6 +76,7 @@ impl NotesModule {
     }
 
     /// Close active window + batch-delete all rich windows + user messages
+    #[instrument(skip(self, bot))]
     pub async fn exit(&mut self, bot: &Bot) {
         // Active rich window
         if let Some(buf) = self.buffer.lock().await.take() {
