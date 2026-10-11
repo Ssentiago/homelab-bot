@@ -3,9 +3,9 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use tokio::process::Command;
 use tracing::{error, info, warn};
 
+use crate::auth;
 use crate::config::Config;
 
 /// True when the local target directory has a working clone of the
@@ -116,49 +116,29 @@ pub fn spawn_cloner(inp: RepoInputs) {
     });
 }
 
-/// Bring target to a working clone of url. Auth is injected via
-/// `http.extraHeader "Authorization: Bearer <TOKEN>"` in the local
-/// .git/config so every git fetch/push in this repo carries that
-/// header. GitHub fine-grained tokens accept Bearer; classic PATs
-/// here would too. No URL-tricks, no daemon-side cred helpers, no
-/// gh plumbing involved. The token consequently sits in ONE file on
-/// disk (this repo's .git/config) and not in any URL or env hack.
+/// Bring target to a working clone of url. Auth is purely in-process:
+/// every git call goes through crate::auth::run_git which injects
+/// `-c credential.helper=` (clears inherited helpers) and an
+/// inline shell helper that reads GH_TOKEN from the bot's env at
+/// invocation time. The token lives only in the bot's process env;
+/// it is never written to .git/, never embedded in any URL, never
+/// appears in argv.
 async fn prime(inp: &RepoInputs) -> Result<(), String> {
     tokio::fs::create_dir_all(&inp.target)
         .await
         .map_err(|e| format!("mkdir target {:?}: {}", inp.target, e))?;
 
-    run_git(&inp.target, &["init", "-b", "master"]).await?;
+    auth::run_git(&inp.target, &["init", "-b", "master"]).await?;
 
-    let header = format!("Authorization: Bearer {}", inp.gh_token);
-    run_git(
-        &inp.target,
-        &["config", "--local", "http.extraHeader", &header],
-    )
-    .await?;
+    let _ = auth::run_git(&inp.target, &["remote", "remove", "origin"]).await;
+    auth::run_git(&inp.target, &["remote", "add", "origin", &inp.url]).await?;
 
-    let _ = run_git(&inp.target, &["remote", "remove", "origin"]).await;
-    run_git(&inp.target, &["remote", "add", "origin", &inp.url]).await?;
-
-    run_git(&inp.target, &["fetch", "origin", "master"]).await?;
-    run_git(&inp.target, &["reset", "--hard", "origin/master"]).await?;
+    auth::run_git(&inp.target, &["fetch", "origin", "master"]).await?;
+    auth::run_git(&inp.target, &["reset", "--hard", "origin/master"]).await?;
 
     tokio::fs::create_dir_all(inp.target.join("00 Inbox"))
         .await
         .map_err(|e| format!("mkdir 00 Inbox: {}", e))?;
-    Ok(())
-}
-
-async fn run_git(dir: &Path, argv: &[&str]) -> Result<(), String> {
-    let mut cmd = Command::new("git");
-    cmd.arg("-C")
-        .arg(dir)
-        .args(argv)
-        .stdin(Stdio::null());
-    let out = cmd.output().await.map_err(|e| format!("spawn: {}", e))?;
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-    }
     Ok(())
 }
 

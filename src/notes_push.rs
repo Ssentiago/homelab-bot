@@ -1,11 +1,11 @@
-use std::process::Stdio;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::{Row, SqlitePool};
-use tokio::process::Command;
 use tracing::{error, info, warn};
 
+use crate::auth;
 use crate::config::Config;
 use crate::repo::REPO_READY;
 
@@ -81,64 +81,36 @@ enum PushOutcome {
 }
 
 async fn push_one(root: &str, path: &str) -> PushOutcome {
-    let run = |argv: &[&str]| {
-        let mut cmd = Command::new("git");
-        cmd.args(argv).current_dir(root).stdin(Stdio::null());
-        async move {
-            cmd.output()
-                .await
-                .map_err(|e: std::io::Error| format!("spawn: {}", e))
-        }
-    };
+    let target = Path::new(root);
 
-    match run(&["pull", "--rebase", "origin", "master"]).await {
-        Ok(o) if o.status.success() => {}
-        Ok(o) => {
-            return PushOutcome::Failed(
-                "pull".into(),
-                String::from_utf8_lossy(&o.stderr).into_owned(),
-            )
-        }
+    match auth::run_git(target, &["pull", "--rebase", "origin", "master"]).await {
+        Ok(()) => {}
         Err(e) => return PushOutcome::Failed("pull".into(), e),
     }
 
-    match run(&["add", path]).await {
-        Ok(o) if o.status.success() => {}
-        Ok(o) => {
-            return PushOutcome::Failed(
-                "add".into(),
-                String::from_utf8_lossy(&o.stderr).into_owned(),
-            )
-        }
+    match auth::run_git(target, &["add", path]).await {
+        Ok(()) => {}
         Err(e) => return PushOutcome::Failed("add".into(), e),
     }
 
-    match run(&["diff", "--cached", "--quiet"]).await {
-        Ok(o) if o.status.success() => return PushOutcome::AlreadyUpToDate,
-        _ => {}
+    if auth::run_git(target, &["diff", "--cached", "--quiet"])
+        .await
+        .is_ok()
+    {
+        return PushOutcome::AlreadyUpToDate;
     }
 
     let msg = format!(
         "bot: note {}",
         chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
     );
-    match run(&["commit", "-m", &msg]).await {
-        Ok(o) if o.status.success() => {}
-        Ok(o) => {
-            return PushOutcome::Failed(
-                "commit".into(),
-                String::from_utf8_lossy(&o.stderr).into_owned(),
-            )
-        }
+    match auth::run_git(target, &["commit", "-m", &msg]).await {
+        Ok(()) => {}
         Err(e) => return PushOutcome::Failed("commit".into(), e),
     }
 
-    match run(&["push", "origin", "master"]).await {
-        Ok(o) if o.status.success() => PushOutcome::Pushed,
-        Ok(o) => PushOutcome::Failed(
-            "push".into(),
-            String::from_utf8_lossy(&o.stderr).into_owned(),
-        ),
+    match auth::run_git(target, &["push", "origin", "master"]).await {
+        Ok(()) => PushOutcome::Pushed,
         Err(e) => PushOutcome::Failed("push".into(), e),
     }
 }
