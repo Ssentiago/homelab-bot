@@ -1,3 +1,12 @@
+## [0.6.0] - 2026-10-11
+
+### Features
+- route all git calls in the notes pipeline through crate::auth::run_git ([`6acec52`](https://github.com/Ssentiago/homelab-bot/commit/6acec5202d5cc73d854caf09ce2b696faba4bd86))
+- migrate notes to a remote https git repo via inline cred helper ([`9099da5`](https://github.com/Ssentiago/homelab-bot/commit/9099da561183266a13cc6c50702b9645b18d0a4e))
+
+### Bug Fixes
+- note rich window shows file title twice and hides empty body ([`6e59d39`](https://github.com/Ssentiago/homelab-bot/commit/6e59d3905540435c66d3cc77ec697c288fe36c4a))
+
 ## [0.5.0] - 2026-07-27
 
 ### Features
