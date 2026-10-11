@@ -20,6 +20,8 @@ pub struct Config {
     pub notify_server_port: u16,
     pub notify_token: String,
     pub root: String,
+    pub notes_repo: String,
+    pub gh_token: String,
     pub debounce_secs: u64,
 }
 
@@ -38,6 +40,8 @@ impl Config {
                 .expect("NOTIFY_SERVER_PORT must be a valid u16"),
             notify_token: env::var("NOTIFY_TOKEN").expect("NOTIFY_TOKEN must be set"),
             root: env::var("NOTES_ROOT").expect("NOTES_ROOT must be set"),
+            notes_repo: env::var("NOTES_REPO").expect("NOTES_REPO must be set"),
+            gh_token: env::var("GH_TOKEN").expect("GH_TOKEN must be set"),
             debounce_secs: env::var("DEBOUNCE_SECS")
                 .unwrap_or_else(|_| "45".to_string())
                 .parse()

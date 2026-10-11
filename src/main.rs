@@ -1,3 +1,4 @@
+mod auth;
 mod cleanup;
 mod config;
 mod db;
@@ -7,7 +8,9 @@ mod heartbeat;
 mod history;
 mod module;
 mod modules;
+mod notes_push;
 mod queue;
+mod repo;
 mod router;
 mod startup;
 mod stats;
@@ -47,26 +50,33 @@ async fn main() {
     dotenvy::dotenv().ok();
 
     let _guard = {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+
         let file_appender = rolling::daily("/var/log/homelab-bot", "bot.log");
-        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-        fmt()
-            .with_writer(non_blocking)
-            .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
-            .with_ansi(false)
+        let (file_writer, file_guard) = tracing_appender::non_blocking(file_appender);
+        let (stdout_writer, stdout_guard) =
+            tracing_appender::non_blocking(std::io::stdout());
+
+        let env_filter = EnvFilter::from_default_env().add_directive("info".parse().unwrap());
+
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(fmt::layer().with_writer(file_writer).with_ansi(false))
+            .with(fmt::layer().with_writer(stdout_writer).with_ansi(false))
             .init();
-        guard
+
+        (file_guard, stdout_guard)
     };
 
     let mut config = Config::from_env();
 
-    let root = PathBuf::from(&config.root);
-    if !root.is_dir() {
-        panic!(
-            "NOTES_ROOT path {:?} does not exist or is not a directory. \
-             Create it manually before starting the bot.",
-            root
-        );
+    let inputs = repo::inputs_from_config(&config);
+    if let Err(e) = repo::preflight(&inputs) {
+        eprintln!("Preflight failed: {}", e);
+        std::process::exit(1);
     }
+    repo::spawn_cloner(inputs);
 
     let bot = Bot::new(&config.bot_token);
 
@@ -137,6 +147,9 @@ async fn main() {
 
     let worker_pool = pool.clone();
     worker::spawn_notification_worker(queue::TaskQueue::new(worker_pool, "pending_notifications"), bot.clone(), config.clone());
+
+    // Cloner already running from preflight spot above; just spin the push worker.
+    notes_push::spawn_push_worker(config.clone(), pool.clone());
 
     // --- FSM + UI ---
     let fsm = Arc::new(tokio::sync::Mutex::new(

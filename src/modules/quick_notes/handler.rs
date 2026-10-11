@@ -127,6 +127,7 @@ async fn handle_message(
             let content = tokio::fs::read_to_string(&active.file_path).await?;
             let new_content = format::replace_message(&content, seq, text);
             tokio::fs::write(&active.file_path, &new_content).await?;
+            enqueue_push(&pool, &active.file_path).await;
 
             let buffer_clone = buffer.clone();
             let debounce_secs = config.debounce_secs;
@@ -152,6 +153,7 @@ async fn handle_message(
             let content = tokio::fs::read_to_string(&active.file_path).await?;
             let new_content = format::append_message(&content, seq, text);
             tokio::fs::write(&active.file_path, &new_content).await?;
+            enqueue_push(&pool, &active.file_path).await;
 
             active.message_count += 1;
             let feedback_msg_id = active.feedback_msg_id;
@@ -176,7 +178,7 @@ async fn handle_message(
         format!("{}_{}.md", now.format("%Y-%m-%d_%H-%M"), slug)
     };
 
-    let root = Path::new(&config.root);
+    let root = Path::new(&config.root).join("00 Inbox");
 
     let mut file_path = root.join(&filename);
     let mut counter = 2;
@@ -197,6 +199,7 @@ async fn handle_message(
 
     let file_content = format!("{}---1---\n\n{}\n", frontmatter, content);
     tokio::fs::write(&file_path, &file_content).await?;
+    enqueue_push(&pool, &file_path).await;
 
     let chat_id = config.chat_id;
     let thread_id = config.thread_ids.input;
@@ -363,5 +366,19 @@ async fn handle_callback(
             .bind(active.feedback_msg_id.0)
             .execute(&pool)
             .await;
+    }
+}
+
+async fn enqueue_push(pool: &SqlitePool, path: &Path) {
+    match sqlx::query("INSERT OR IGNORE INTO note_push_tasks (path) VALUES (?)")
+        .bind(path.to_string_lossy().as_ref())
+        .execute(pool)
+        .await
+    {
+        Ok(r) if r.rows_affected() > 0 => {
+            info!("Enqueued note for git push: {}", path.display());
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!("Failed to enqueue note {}: {}", path.display(), e),
     }
 }

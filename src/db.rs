@@ -99,6 +99,16 @@ pub async fn init_db() -> SqlitePool {
     .await
     .expect("Failed to create pending_cleanup table");
 
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS note_push_tasks (
+            path TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )",
+    )
+    .execute(&pool)
+    .await
+    .expect("Failed to create note_push_tasks table");
+
     info!("Database initialized");
     pool
 }
