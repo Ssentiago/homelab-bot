@@ -314,15 +314,19 @@ fn truncate_at_word_boundary(s: &str, max_len: usize) -> &str {
 fn strip_frontmatter(content: &str) -> &str {
     content
         .strip_prefix("---\n")
-        .and_then(|s| s.find("\n---\n"))
-        .map(|end| &content[end + 5..])
+        .and_then(|s| s.find("\n---\n").map(|end| &s[end + 5..]))
         .unwrap_or(content)
 }
 
 fn render_for_display(content: &str) -> String {
     let without_frontmatter = strip_frontmatter(content);
     let re = regex::Regex::new(r"(?m)^---\d+---").unwrap();
-    re.replace_all(without_frontmatter, "").to_string()
+    let rendered = re.replace_all(without_frontmatter, "").to_string();
+    if rendered.trim().is_empty() {
+        "_Пусто_".to_string()
+    } else {
+        rendered
+    }
 }
 
 async fn handle_callback(
@@ -358,9 +362,10 @@ async fn handle_callback(
 
         let file_content = tokio::fs::read_to_string(&active.file_path).await.unwrap_or_default();
         let render_content = render_for_display(&file_content);
-        let final_content = format!("Файл сохранён: {}\n\n{}", filename, render_content);
-
-        let _ = rich_client.update_window(chat_id, msg_id, None, Some(&filename), &final_content).await;
+        // Header "Файл сохранён: <filename>" is already added by
+        // RichClient::build_final_message when filename is Some. Do NOT
+        // prefix it here again - that caused the double title.
+        let _ = rich_client.update_window(chat_id, msg_id, None, Some(&filename), &render_content).await;
         let _ = sqlx::query("INSERT INTO pending_cleanup (chat_id, message_id) VALUES (?, ?)")
             .bind(chat_id)
             .bind(active.feedback_msg_id.0)
@@ -380,5 +385,24 @@ async fn enqueue_push(pool: &SqlitePool, path: &Path) {
         }
         Ok(_) => {}
         Err(e) => tracing::warn!("Failed to enqueue note {}: {}", path.display(), e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_for_display;
+
+    #[test]
+    fn empty_content_renders_pusto() {
+        let raw = "---\ncreated: 2020-01-01T00:00:00Z\nsource: telegram\n---\n\n---1---\n\n\n";
+        assert_eq!(render_for_display(raw), "_Пусто_");
+    }
+
+    #[test]
+    fn content_with_body_renders_body() {
+        let raw = "---\ncreated: 2020-01-01T00:00:00Z\nsource: telegram\n---\n\n---1---\n\nтест\n";
+        let out = render_for_display(raw);
+        assert!(out.contains("тест"));
+        assert!(!out.contains("_Пусто_"));
     }
 }
