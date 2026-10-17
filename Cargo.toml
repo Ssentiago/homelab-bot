@@ -13,8 +13,7 @@ regex = "1"
 tracing-appender = "0.2"
 
 [dependencies.frankenstein]
-git = "https://github.com/ayrat555/frankenstein"
-tag = "0.51.0"
+version = "0.52.1"
 features = ["client-reqwest"]
 
 [dependencies.sqlx]
