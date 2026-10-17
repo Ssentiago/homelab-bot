@@ -5,12 +5,13 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use teloxide::prelude::*;
-use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
+use teloxide::types::{CallbackQuery, ChatId, MessageId};
 use sqlx::{Row, SqlitePool};
 use tracing::instrument;
 
 use crate::config::Config;
 use crate::module::{Action, ModuleError};
+use crate::ui::screens::Screen;
 use super::handler;
 
 type ActiveBuffer = Arc<tokio::sync::Mutex<Option<handler::InboxBuffer>>>;
@@ -62,12 +63,7 @@ impl NotesModule {
     #[instrument(skip(self, q), fields(data = ?q.data))]
     pub async fn handle_callback(&mut self, q: CallbackQuery) -> Result<Action, ModuleError> {
         match q.data.as_deref() {
-            Some("notes:history") => {
-                Ok(Action::EditUI {
-                    text: "📋 История (пока заглушка)".to_string(),
-                    keyboard: notes_keyboard(),
-                })
-            }
+            Some("notes:history") => Ok(Action::EditUI { screen: Screen::History }),
             _ => {
                 self.callback_tx.send(q).await.ok();
                 Ok(Action::Noop)
@@ -104,15 +100,4 @@ impl NotesModule {
         }
         self.user_msg_ids.clear();
     }
-}
-
-pub fn notes_keyboard() -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![
-        vec![
-            InlineKeyboardButton::callback("📋 История", "notes:history"),
-        ],
-        vec![
-            InlineKeyboardButton::callback("← Назад", "menu:main"),
-        ],
-    ])
 }

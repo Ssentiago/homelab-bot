@@ -8,8 +8,9 @@ use tracing::{info, warn, instrument};
 
 use crate::config::Config;
 use crate::module::{Action, InputPayload, Mode, ModuleError, RouteKind, ThreadTarget};
-use crate::modules::quick_notes::notes_module::{self, NotesModule};
-use crate::ui::{self, UiPanel};
+use crate::modules::quick_notes::notes_module::NotesModule;
+use crate::ui::screens::Screen;
+use crate::ui::UiPanel;
 
 pub struct Fsm {
     pub mode: Mode,
@@ -42,7 +43,7 @@ impl Fsm {
     pub async fn reset_to_main_menu(&mut self, bot: &Bot) {
         info!("reset to main menu from {:?}", self.mode);
         self.switch_mode_from(bot, Mode::MainMenu).await;
-        self.ui.force_resend(&ui::main_menu_text(), ui::main_menu_keyboard()).await;
+        self.ui.force_resend(&Screen::Main).await;
     }
 
     /// Единая точка входа — вызывается из Router после классификации мидлварью
@@ -75,30 +76,24 @@ impl Fsm {
         match target {
             Mode::MainMenu => {
                 self.switch_mode_from(bot, Mode::MainMenu).await;
-                Ok(Action::EditUI {
-                    text: ui::main_menu_text(),
-                    keyboard: ui::main_menu_keyboard(),
-                })
+                Ok(Action::EditUI { screen: Screen::Main })
             }
             Mode::Notes => {
                 self.switch_mode_from(bot, Mode::Notes).await;
-                Ok(Action::EditUI {
-                    text: "📝 Заметки — активно\n\nОтправьте сообщение для сохранения".to_string(),
-                    keyboard: notes_module::notes_keyboard(),
-                })
+                Ok(Action::EditUI { screen: Screen::Notes })
             }
             Mode::Status => {
                 self.switch_mode_from(bot, Mode::Status).await;
                 Ok(Action::EditUI {
-                    text: self.status_text().await,
-                    keyboard: ui::back_keyboard(),
+                    screen: Screen::Status {
+                        chat_id: self.config.chat_id,
+                        panel_topic: self.config.thread_ids.input.unwrap_or(0),
+                        monitor_topic: self.config.thread_ids.output.unwrap_or(0),
+                    },
                 })
             }
             Mode::Music | Mode::Summary => {
-                Ok(Action::EditUI {
-                    text: "Coming soon".to_string(),
-                    keyboard: ui::main_menu_keyboard(),
-                })
+                Ok(Action::EditUI { screen: Screen::ComingSoon })
             }
         }
     }
@@ -133,28 +128,12 @@ impl Fsm {
         match payload {
             InputPayload::Text(_) => match self.mode {
                 Mode::MainMenu | Mode::Status => Ok(Action::Noop),
-                _ => Ok(Action::EditUI {
-                    text: "Coming soon".to_string(),
-                    keyboard: ui::main_menu_keyboard(),
-                }),
+                _ => Ok(Action::EditUI { screen: Screen::ComingSoon }),
             },
             InputPayload::Edit(_) => Ok(Action::Noop),
             InputPayload::Callback(_) => Ok(Action::Noop),
             _ => Ok(Action::Noop),
         }
-    }
-
-    async fn status_text(&self) -> String {
-        let notes_health = "🟢 активно";
-        let version = env!("CARGO_PKG_VERSION");
-        format!(
-            "Homelab Bot v{}\n\n\
-             📝 Заметки — {}\n\
-             🎵 Музыка — ожидает\n\
-             📊 Саммари — ожидает\n\
-             📢 Уведомления — 🟢 активно",
-            version, notes_health
-        )
     }
 
     #[instrument(skip(self, bot), fields(from = ?self.mode, to = ?new_mode))]
@@ -191,23 +170,21 @@ impl Fsm {
             Err(ModuleError::Processing(e)) => {
                 warn!("module processing error: {}", e);
                 Action::EditUI {
-                    text: format!("⚠ Ошибка: {}", e),
-                    keyboard: ui::back_keyboard(),
+                    screen: Screen::Error { message: e, fatal: false },
                 }
             }
             Err(ModuleError::Fatal(e)) => {
                 info!("module fatal error, resetting to MainMenu: {}", e);
                 self.mode = Mode::MainMenu;
                 Action::EditUI {
-                    text: format!("⚠ Ошибка модуля: {}\n\nВыберите действие:", e),
-                    keyboard: ui::main_menu_keyboard(),
+                    screen: Screen::Error { message: e, fatal: true },
                 }
             }
         };
 
         match action {
-            Action::EditUI { text, keyboard } => {
-                self.ui.edit(&text, keyboard).await;
+            Action::EditUI { screen } => {
+                self.ui.edit(&screen).await;
             }
             Action::SendMessage { text, thread } => {
                 let thread_id = match thread {

@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 
-use teloxide::types::InlineKeyboardMarkup;
+use crate::ui::screens::Screen;
 
 /// Результат обработки — что FSM должен сделать после возврата из модуля
 #[derive(Debug)]
 pub enum Action {
-    EditUI { text: String, keyboard: InlineKeyboardMarkup },
+    EditUI { screen: Screen },
     SendMessage { text: String, thread: ThreadTarget },
     DeleteMessages(Vec<i64>),
     SwitchMode(Mode),
