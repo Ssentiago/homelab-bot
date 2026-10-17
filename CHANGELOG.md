@@ -1,3 +1,11 @@
+## [0.7.0] - 2026-10-17
+
+### Features
+- migrate panel to Rich Messages (Bot API 10.3) ([`50d146b`](https://github.com/Ssentiago/homelab-bot/commit/50d146be6001c4054ce134f2ab6d4a1f8a21a0bf))
+
+### Bug Fixes
+- ack every callback immediately, ignore message not modified ([`23efb1e`](https://github.com/Ssentiago/homelab-bot/commit/23efb1e58769bea088fddb423b7f5b75d961cfe1))
+
 ## [0.6.0] - 2026-10-11
 
 ### Features
