@@ -115,7 +115,8 @@ impl UiPanel {
             Ok(_) => Ok(()),
             Err(e) => {
                 let err = format!("{e}");
-                if err.contains("not modified") {
+                if err.contains("message is not modified") {
+                    // экран уже в нужном состоянии — не сбой
                     Ok(())
                 } else {
                     Err(err)

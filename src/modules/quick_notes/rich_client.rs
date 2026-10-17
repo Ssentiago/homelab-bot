@@ -89,8 +89,13 @@ impl RichClient {
         match result {
             Ok(_) => Ok(()),
             Err(e) => {
-                error!("Failed to edit rich message: {:?}", e);
-                Err(format!("edit_message_text failed: {:?}", e))
+                let err = format!("{e:?}");
+                if err.contains("message is not modified") {
+                    Ok(())
+                } else {
+                    error!("Failed to edit rich message: {:?}", e);
+                    Err(format!("edit_message_text failed: {:?}", e))
+                }
             }
         }
     }

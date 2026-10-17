@@ -96,10 +96,15 @@ pub fn create_dispatcher(
         )
         .branch(
             Update::filter_callback_query()
-                .filter_map(|q: CallbackQuery| classify_callback(&q))
-                .endpoint(move |bot: Bot, q: CallbackQuery, route: RouteKind| {
+                .endpoint(move |bot: Bot, q: CallbackQuery| {
                     let fsm = fsm_cb.clone();
                     async move {
+                        // гасим анимацию на кнопке сразу; не зависит от исхода обработки
+                        let _ = bot.answer_callback_query(q.id.clone()).await;
+
+                        let Some(route) = classify_callback(&q) else {
+                            return Ok(());
+                        };
                         let chat_id = q.message.as_ref().map(|m| m.chat().id.0).unwrap_or(0);
                         let mut guard = fsm.lock().await;
                         guard.handle_routed(&bot, chat_id, route, None).await;
